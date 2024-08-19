@@ -6,5 +6,34 @@
   "GPIO Interrupt Demo": {
       "path": "Basic_Demos/GPIO_Interrupt_Demo",
       "name": "GPIO_Interrupt_Demo"
+  },
+  "Memory Experiment": {
+      "path": "Basic_Demos/Memory_Experiment",
+      "name": "Memory_Experiment"
+  },
+  "Timer Interrupt DDS": {
+      "path": "Audio/a_Timer_Interrupt_DDS_Demo",
+      "name": "Timer_Interrupt_DDS_Demo"
+  },
+   "Multicore DDS Demo": {
+      "path": "Audio/b_Multicore_DDS_Demo",
+      "name": "Multicore_DDS_Demo"
+  },
+  "Beep Synth (Single Core)": {
+      "path": "Audio/c_Audio_Beep_Synthesis_Single_Core",
+      "name": "Audio_Beep_Synthesis_Single_Core"
+  },
+  "Beep Synth (Multicore)": {
+      "path": "Audio/d_Audio_Beep_Synthesis_Multicore",
+      "name": "Audio_Beep_Synthesis_Multicore"
+  },
+  "Audio DMA Demo": {
+      "path": "Audio/e_DMA_Demo",
+      "name": "DMA_Demo"
+  },
+  "Audio FFT Demo": {
+      "path": "Audio/f_Audio_FFT",
+      "name": "Audio_FFT"
   }
+}
 }
