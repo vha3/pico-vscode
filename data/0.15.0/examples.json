@@ -1,6 +1,10 @@
 {
-  "blinky": {
+  "Blinky": {
       "path": "Basic_Demos/Blinky_Demo",
-      "name": "blinky"
+      "name": "Blinky"
+  },
+  "GPIO Interrupt Demo": {
+      "path": "Basic_Demos/GPIO_Interrupt_Demo",
+      "name": "GPIO_Interrupt_Demo"
   }
 }
