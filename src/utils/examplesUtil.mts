@@ -14,12 +14,11 @@ import {
 } from "./downloadHelpers.mjs";
 
 const EXAMPLES_REPOSITORY_URL =
-  "https://github.com/raspberrypi/pico-examples.git";
+  "https://github.com/vha3/Hunter-Adams-RP2040-Demos.git";
 const EXAMPLES_JSON_URL =
-  "https://raspberrypi.github.io/pico-vscode/" +
-  `${CURRENT_DATA_VERSION}/examples.json`;
+  "https://raw.githubusercontent.com/vha3/pico-vscode/main/data/0.15.0/examples.json";
 const EXAMPLES_GITREF = 
-  "7fe60d6b4027771e45d97f207532c41b1d8c5418";
+  "272b17f108f628ba8357d1c683cef4d6b475c27c";
 const EXAMPLES_TAG = 
   "sdk-2.0.0";
 
