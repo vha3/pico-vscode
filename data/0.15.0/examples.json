@@ -11,19 +11,19 @@
       "path": "Basic_Demos/Memory_Experiment",
       "name": "Memory_Experiment"
   },
-  "Timer Interrupt DDS": {
+  "Audio Timer Interrupt DDS": {
       "path": "Audio/a_Timer_Interrupt_DDS_Demo",
       "name": "Timer_Interrupt_DDS_Demo"
   },
-   "Multicore DDS Demo": {
+   "Audio Multicore DDS Demo": {
       "path": "Audio/b_Multicore_DDS_Demo",
       "name": "Multicore_DDS_Demo"
   },
-  "Beep Synth (Single Core)": {
+  "Audio Beep Synth (Single Core)": {
       "path": "Audio/c_Audio_Beep_Synthesis_Single_Core",
       "name": "Audio_Beep_Synthesis_Single_Core"
   },
-  "Beep Synth (Multicore)": {
+  "Audio Beep Synth (Multicore)": {
       "path": "Audio/d_Audio_Beep_Synthesis_Multicore",
       "name": "Audio_Beep_Synthesis_Multicore"
   },
@@ -90,5 +90,49 @@
   "Protothreads Demo": {
       "path": "Protothreads/Protothreads_Demo",
       "name": "Protothreads_Demo"
+  },
+  "MPU6050 IMU": {
+      "path": "Sensors/MPU6050_IMU_Demo",
+      "name": "IMU_Demo"
+  },
+  "Stepper Motors (delta robot demo)": {
+      "path": "Stepper_Motors/Delta_Robot_Demo",
+      "name": "Delta_Robot"
+  },
+  "Stepper Motors (position and speed)": {
+      "path": "Stepper_Motors/Stepper_Position_And_Speed_Control",
+      "name": "Position_and_Speed"
+  },
+  "Stepper Motors (position)": {
+      "path": "Stepper_Motors/Stepper_Position_Control",
+      "name": "Position"
+  },
+  "Stepper Motors (speed)": {
+      "path": "Stepper_Motors/Stepper_Speed_Control",
+      "name": "Speed"
+  },
+  "VGA Animation Demo": {
+      "path": "VGA_Graphics/Animation_Demo",
+      "name": "Animation"
+  },
+  "VGA Barnsley Fern": {
+      "path": "VGA_Graphics/Barnsley_Fern",
+      "name": "Barnsley_Fern"
+  },
+  "VGA Conway's Game of Life": {
+      "path": "VGA_Graphics/Game_of_Life",
+      "name": "Game_of_Life"
+  },
+  "VGA Mandelbrot Set": {
+      "path": "VGA_Graphics/Mandelbrot_Set",
+      "name": "Mandelbrot"
+  },
+  "VGA Fonts and Colors Demo": {
+      "path": "VGA_Graphics/VGA_Fonts_and_Colors",
+      "name": "Fonts_and_Colors"
+  },
+  "VGA Graphics Primitives": {
+      "path": "VGA_Graphics/VGA_Graphics_Primitives",
+      "name": "Graphics_Primitives"
   }
 }
