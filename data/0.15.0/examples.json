@@ -34,5 +34,29 @@
   "Audio FFT Demo": {
       "path": "Audio/f_Audio_FFT",
       "name": "Audio_FFT"
+  },
+  "GATT Client": {
+      "path": "Bluetooth/GATT_Client",
+      "name": "GATT_Client"
+  },
+  "GATT Server": {
+      "path": "Bluetooth/GATT_Server",
+      "name": "GATT_Server"
+  },
+  "Serial Bootloader": {
+      "path": "Bootloaders/Serial_bootloader/Bootloader",
+      "name": "Serial_Bootloader"
+  },
+  "Serial Bootloader (application)": {
+      "path": "Bootloaders/Serial_bootloader/Application",
+      "name": "Serial_Bootloader_Application"
+  },
+  "Worm Bootloader": {
+      "path": "Bootloaders/Serial_worm/Bootloader",
+      "name": "Serial_Worm"
+  },
+  "Worm Bootloader (application)": {
+      "path": "Bootloaders/Serial_worm/Application",
+      "name": "Serial_Worm_Application"
   }
 }
