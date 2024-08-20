@@ -58,5 +58,37 @@
   "Worm Bootloader (application)": {
       "path": "Bootloaders/Serial_worm/Application",
       "name": "Serial_Worm_Application"
+  },
+  "Keypad": {
+      "path": "Human_Input/Keypad",
+      "name": "Keypad"
+  },
+  "Resistive Touchscreen": {
+      "path": "Human_Input/Resistive_Touchscreen_Demo",
+      "name": "Resistive_Touchscreen"
+  },
+  "CAN Bus": {
+      "path": "Networking/CAN",
+      "name": "CAN"
+  },
+  "UDP Transmitter (PIO)": {
+      "path": "Networking/UDP_Transmitter",
+      "name": "UDP_TX_PIO"
+  },
+  "PWM Radio Beacon": {
+      "path": "PWM/AM_Radio_Beacon",
+      "name": "AM_Beacon"
+  },
+  "PWM Voice over Radio": {
+      "path": "PWM/AM_Radio_Voice",
+      "name": "AM_Voice"
+  },
+  "PWM Demo": {
+      "path": "PWM/PWM_Demo",
+      "name": "PWM_Demo"
+  },
+  "Protothreads Demo": {
+      "path": "Protothreads/Protothreads_Demo",
+      "name": "Protothreads_Demo"
   }
 }
