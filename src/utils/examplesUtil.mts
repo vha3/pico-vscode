@@ -18,7 +18,7 @@ const EXAMPLES_REPOSITORY_URL =
 const EXAMPLES_JSON_URL =
   "https://raw.githubusercontent.com/vha3/pico-vscode/main/data/0.15.0/examples.json";
 const EXAMPLES_GITREF = 
-  "272b17f108f628ba8357d1c683cef4d6b475c27c";
+  "9885555f7500f667c7b810b8b7dadb9cf5305f61";
 const EXAMPLES_TAG = 
   "sdk-2.0.0";
 
