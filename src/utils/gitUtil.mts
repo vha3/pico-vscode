@@ -7,20 +7,48 @@ import { SettingsKey, HOME_VAR } from "../settings.mjs";
 import { homedir } from "os";
 import which from "which";
 import { window } from "vscode";
+import { compareGe } from "./semverUtil.mjs";
 
 export const execAsync = promisify(exec);
+
+export const MIN_GIT_VERSION="2.28.0";
+
+export async function checkGitVersion(gitExecutable: string):
+  Promise<[boolean, string]> 
+{
+  const versionCommand =
+    `${
+      process.env.ComSpec === "powershell.exe" ? "&" : ""
+    }"${gitExecutable}" version`;
+  const ret = await execAsync(versionCommand)
+  const regex = /git version (\d+\.\d+(\.\d+)*)/;
+  const match = regex.exec(ret.stdout);
+  if (match && match[1]) {
+    const gitVersion = match[1];
+
+    return [compareGe(gitVersion, MIN_GIT_VERSION), gitVersion]; 
+  } else {
+    return [false, "unknown"];
+  }
+}
 
 /**
  * Get installed version of git, and install it if it isn't already
  */
-export async function getGit(
-  settings: Settings
-): Promise<string | undefined> {
+export async function getGit(settings: Settings): Promise<string | undefined> {
   let gitExecutable: string | undefined =
     settings
       .getString(SettingsKey.gitPath)
       ?.replace(HOME_VAR, homedir().replaceAll("\\", "/")) || "git";
   let gitPath = await which(gitExecutable, { nothrow: true });
+  let gitVersion: string | undefined;
+  if (gitPath !== null) {
+    const versionRet = await checkGitVersion(gitPath);
+    if (!versionRet[0]) {
+      gitPath = null;
+    }
+    gitVersion = versionRet[1];
+  }
   if (gitPath === null) {
     // if git is not in path then checkForInstallationRequirements
     // maye downloaded it, so reload
@@ -29,12 +57,23 @@ export async function getGit(
       .getString(SettingsKey.gitPath)
       ?.replace(HOME_VAR, homedir().replaceAll("\\", "/"));
     if (gitExecutable === null || gitExecutable === undefined) {
-      Logger.log("Error: Git not found.");
+      if (gitVersion !== undefined) {
+        Logger.log(`Error: Found Git version ${gitVersion} - ` +
+          `requires ${MIN_GIT_VERSION}.`);
 
-      await window.showErrorMessage(
-        "Git not found. Please install and add to PATH or " +
-          "set the path to the git executable in global settings."
-      );
+        await window.showErrorMessage(
+          `Found Git version ${gitVersion}, but requires ${MIN_GIT_VERSION}. ` +
+          "Please install and add to PATH or " +
+            "set the path to the git executable in global settings."
+        );
+      } else {
+        Logger.log("Error: Git not found.");
+
+        await window.showErrorMessage(
+          "Git not found. Please install and add to PATH or " +
+            "set the path to the git executable in global settings."
+        );
+      }
 
       return undefined;
     } else {
@@ -42,7 +81,7 @@ export async function getGit(
     }
   }
 
-  return gitPath;
+  return gitPath || undefined;
 }
 
 /**
@@ -57,8 +96,11 @@ export async function initSubmodules(
 ): Promise<boolean> {
   try {
     // Use the "git submodule update --init" command in the specified directory
+    // `cd` command need '/d' option on Windows. (Change drive "d:\" to "c:\")
     const command =
-      `cd "${sdkDirectory}" && ` +
+      `cd ${
+        process.env.ComSpec?.endsWith("cmd.exe") ? "/d " : " "
+      }"${sdkDirectory}" && ` +
       `${
         process.env.ComSpec === "powershell.exe" ? "&" : ""
       }"${gitExecutable}" submodule update --init`;
@@ -125,7 +167,9 @@ export async function sparseCloneRepository(
   try {
     await execAsync(cloneCommand);
     await execAsync(
-      `cd "${targetDirectory}" && ${
+      `cd ${
+        process.env.ComSpec?.endsWith("cmd.exe") ? "/d " : " " 
+      }"${targetDirectory}" && ${
         process.env.ComSpec === "powershell.exe" ? "&" : ""
       }"${gitExecutable}" sparse-checkout set --cone`
     );
@@ -167,7 +211,9 @@ export async function sparseCheckout(
 ): Promise<boolean> {
   try {
     await execAsync(
-      `cd "${repoDirectory}" && ${
+      `cd ${
+        process.env.ComSpec?.endsWith("cmd.exe") ? "/d " : " " 
+      } "${repoDirectory}" && ${
         process.env.ComSpec === "powershell.exe" ? "&" : ""
       }"${gitExecutable}" sparse-checkout add ${checkoutPath}`
     );

@@ -1,14 +1,14 @@
 // TODO: put defaults into json file, to prevent need for these disables
 import type { ExtensionContext, Memento } from "vscode";
 import type { GithubReleaseResponse, GithubRepository } from "./githubREST.mjs";
-import Logger from "../logger.mjs";
+import Logger, { LoggerSource } from "../logger.mjs";
 import { getDataRoot } from "./downloadHelpers.mjs";
 import { get } from "https";
-import {
-  isInternetConnected, CURRENT_DATA_VERSION
-} from "./downloadHelpers.mjs";
+import { isInternetConnected } from "./downloadHelpers.mjs";
 import { join as joinPosix } from "path/posix";
 import { readFileSync } from "fs";
+import { unknownErrorToString } from "./errorHelper.mjs";
+import { CURRENT_DATA_VERSION } from "./sharedConstants.mjs";
 
 /**
  * Tells if the stored data is a GithubReleaseResponse (data of a specific release)
@@ -33,29 +33,28 @@ export interface GithubApiCacheEntry {
   etag: string;
 }
 
-
 const CACHE_JSON_URL =
   "https://raspberrypi.github.io/pico-vscode/" +
   `${CURRENT_DATA_VERSION}/github-cache.json`;
 
-
-function parseCacheJson(
-  data: string
-): { [id: string] : GithubReleaseResponse | string[] } {
+function parseCacheJson(data: string): {
+  [id: string]: GithubReleaseResponse | string[];
+} {
   try {
-    const cache =
-      JSON.parse(
-        data.toString()
-      ) as { [id: string] : GithubReleaseResponse | string[] };
+    const cache = JSON.parse(data.toString()) as {
+      [id: string]: GithubReleaseResponse | string[];
+    };
 
     return cache;
-  } catch {
-    Logger.log("Failed to parse github-cache.json");
-
-    throw new Error(
-      "Error while downloading github cache. " +
-        "Parsing Failed"
+  } catch (error) {
+    Logger.error(
+      LoggerSource.githubApiCache,
+      "Failed to parse github-cache.json:",
+      unknownErrorToString(error)
     );
+
+    // TODO: no rethrowing in catch block!
+    throw new Error("Parsing Failed");
   }
 }
 
@@ -73,82 +72,89 @@ export async function defaultCacheOfRepository(
   try {
     if (!(await isInternetConnected())) {
       throw new Error(
-        "Error while downloading github cache. " +
-          "No internet connection"
+        "Error while downloading github cache. " + "No internet connection"
       );
     }
-    const result = await new Promise<
-      { [id: string] : GithubReleaseResponse | string[] }
-    >(
-      (resolve, reject) => {
-        // Download the JSON file
-        get(CACHE_JSON_URL, response => {
-          if (response.statusCode !== 200) {
+    const result = await new Promise<{
+      [id: string]: GithubReleaseResponse | string[];
+    }>((resolve, reject) => {
+      // Download the JSON file
+      get(CACHE_JSON_URL, response => {
+        if (response.statusCode !== 200) {
+          reject(
+            new Error(
+              "Error while downloading github cache list. " +
+                `Status code: ${response.statusCode}`
+            )
+          );
+        }
+        let data = "";
+
+        // Append data as it arrives
+        response.on("data", chunk => {
+          data += chunk;
+        });
+
+        // Parse the JSON data when the download is complete
+        response.on("end", () => {
+          // Resolve with the array of SupportedToolchainVersion
+          const ret = parseCacheJson(data);
+          if (ret !== undefined) {
+            resolve(ret);
+          } else {
             reject(
               new Error(
                 "Error while downloading github cache list. " +
-                  `Status code: ${response.statusCode}`
+                  "Parsing data failed"
               )
             );
           }
-          let data = "";
-
-          // Append data as it arrives
-          response.on("data", chunk => {
-            data += chunk;
-          });
-
-          // Parse the JSON data when the download is complete
-          response.on("end", () => {
-            // Resolve with the array of SupportedToolchainVersion
-            const ret = parseCacheJson(data);
-            if (ret !== undefined) {
-              resolve(ret);
-            } else {
-              reject(
-                new Error(
-                  "Error while downloading github cache list. " +
-                    "Parsing data failed"
-                )
-              );
-            }
-          });
-
-          // Handle errors
-          response.on("error", error => {
-            reject(error);
-          });
         });
-      }
+
+        // Handle errors
+        response.on("error", error => {
+          reject(error);
+        });
+      });
+    });
+
+    Logger.debug(
+      LoggerSource.githubApiCache,
+      "Successfully downloaded github cache from the internet."
     );
 
-    // TODO: Logger.debug
-    Logger.log(`Successfully downloaded github cache from the internet.`);
-
-    ret.data = result[
-      `githubApiCache-${repository}-${dataType}`
-      + `${tag !== undefined ? '-' + tag : ''}`
-    ];
+    ret.data =
+      result[
+        `githubApiCache-${repository}-${dataType}` +
+          `${tag !== undefined ? "-" + tag : ""}`
+      ];
 
     return ret;
   } catch (error) {
-    Logger.log(error instanceof Error ? error.message : (error as string));
-
-    Logger.log("Failed to load github-cache.json");
+    Logger.error(
+      LoggerSource.githubApiCache,
+      "Failed to download github-cache.json:",
+      unknownErrorToString(error)
+    );
 
     try {
       const cacheFile = readFileSync(
         joinPosix(getDataRoot(), "github-cache.json")
       );
       const parsed = parseCacheJson(cacheFile.toString("utf-8"));
-      ret.data = parsed[
-        `githubApiCache-${repository}-${dataType}`
-        + `${tag !== undefined ? '-' + tag : ''}`
-      ];
+      ret.data =
+        parsed[
+          `githubApiCache-${repository}-${dataType}` +
+            `${tag !== undefined ? "-" + tag : ""}`
+        ];
 
       return ret;
-    } catch (e) {
-      Logger.log("Failed to load local github-cache.json");
+    } catch (error) {
+      Logger.error(
+        LoggerSource.githubApiCache,
+        "Failed to load local github-cache.json:",
+        unknownErrorToString(error)
+      );
 
       return undefined;
     }
@@ -211,20 +217,24 @@ export default class GithubApiCache {
     etag?: string
   ): Promise<void> {
     if (etag === undefined) {
-      // TODO: Logger.warn
-      Logger.log("GithubApiCache.saveResponse: response without etag.");
+      Logger.warn(
+        LoggerSource.githubApiCache,
+        "Can't save response without etag."
+      );
 
       return;
     }
 
     await this.globalState.update(
-      `githubApiCache-${repository}-${dataType}`
-      + `${tag !== undefined ? '-' + tag : ''}`, {
+      `githubApiCache-${repository}-${dataType}` +
+        `${tag !== undefined ? "-" + tag : ""}`,
+      {
         repository,
         dataType,
         data,
         etag,
-    } as GithubApiCacheEntry);
+      } as GithubApiCacheEntry
+    );
   }
 
   public async getResponse(
@@ -233,8 +243,8 @@ export default class GithubApiCache {
     tag?: string
   ): Promise<GithubApiCacheEntry | undefined> {
     return this.globalState.get(
-      `githubApiCache-${repository}-${dataType}`
-      + `${tag !== undefined ? '-' + tag : ''}`
+      `githubApiCache-${repository}-${dataType}` +
+        `${tag !== undefined ? "-" + tag : ""}`
     );
   }
 
@@ -267,8 +277,8 @@ export default class GithubApiCache {
     );
     if (lastEtag) {
       return this.globalState.get(
-        `githubApiCache-${repository}-${dataType}`
-        + `${tag !== undefined ? '-' + tag : ''}`
+        `githubApiCache-${repository}-${dataType}` +
+          `${tag !== undefined ? "-" + tag : ""}`
       );
     } else {
       return defaultCacheOfRepository(repository, dataType, tag);

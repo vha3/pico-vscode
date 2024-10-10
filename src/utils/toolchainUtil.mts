@@ -5,9 +5,8 @@ import { join } from "path";
 import Logger from "../logger.mjs";
 import { readdirSync, statSync, readFileSync } from "fs";
 import { getDataRoot } from "./downloadHelpers.mjs";
-import {
-  isInternetConnected, CURRENT_DATA_VERSION
-} from "./downloadHelpers.mjs";
+import { isInternetConnected } from "./downloadHelpers.mjs";
+import { CURRENT_DATA_VERSION } from "./sharedConstants.mjs";
 
 const iniUrl =
   "https://raspberrypi.github.io/pico-vscode/" +
@@ -103,7 +102,13 @@ export async function getSupportedToolchains(): Promise<
 
     return result;
   } catch (error) {
-    Logger.log(error instanceof Error ? error.message : (error as string));
+    Logger.log(
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+        ? error
+        : "Unknown error"
+    );
 
     try {
       // try to load local supported toolchains list
@@ -114,7 +119,7 @@ export async function getSupportedToolchains(): Promise<
       );
 
       return supportedToolchains;
-    } catch (error2) {
+    } catch {
       Logger.log("Error while loading local supported toolchains list.");
 
       return [];
@@ -154,7 +159,7 @@ export function detectInstalledToolchains(): InstalledToolchain[] {
 
       installedToolchains.push({ version, path: toolchainPath });
     }
-  } catch (error) {
+  } catch {
     Logger.log("Error while detecting installed Toolchains.");
   }
 

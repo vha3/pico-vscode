@@ -96,7 +96,7 @@ code_fragments_per_feature = {
                 "// UART defines",
                 "// By default the stdout UART is `uart0`, so we will use the second one",
                 "#define UART_ID uart1",
-                "#define BAUD_RATE 9600", "",
+                "#define BAUD_RATE 115200", "",
                 "// Use pins 4 and 5 for UART1",
                 "// Pins can be changed, see the GPIO function select table in the datasheet for information on GPIO assignments",
                 "#define UART_TX_PIN 4",
@@ -109,6 +109,20 @@ code_fragments_per_feature = {
                 "// Set datasheet for more information on function select",
                 "gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);",
                 "gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);",
+                "",
+                "// Use some the various UART functions to send out data",
+                "// In a default system, printf will also output via the default UART",
+                "",
+                # here should be following
+                # "// Send out a character without any conversions",
+                #"uart_putc_raw(UART_ID, 'A');",
+                #"",
+                #"// Send out a character but do CR/LF conversions",
+                #"uart_putc(UART_ID, 'B');",
+                # "",
+                "// Send out a string, with CR/LF conversions",
+                "uart_puts(UART_ID, \" Hello, UART!\\n\");",
+                "",
                 "// For more examples of UART use see https://github.com/raspberrypi/pico-examples/tree/master/uart"
               )
             ],
@@ -361,17 +375,8 @@ def relativePicotoolPath(picotoolVersion):
 def relativeOpenOCDPath(openocdVersion):
     return f"/.pico-sdk/openocd/{openocdVersion}"
 
-def cmakeSdkPath(sdkVersion):
-    return f"${{USERHOME}}{relativeSDKPath(sdkVersion)}"
-
-def cmakeToolchainPath(toolchainVersion):
-    return f"${{USERHOME}}{relativeToolchainPath(toolchainVersion)}"
-
-def cmakeToolsPath(sdkVersion):
-    return f"${{USERHOME}}{relativeToolsPath(sdkVersion)}"
-
-def cmakePicotoolPath(picotoolVersion):
-    return f"${{USERHOME}}{relativePicotoolPath(picotoolVersion)}"
+def cmakeIncPath():
+    return "${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake"
 
 def propertiesSdkPath(sdkVersion, force_windows=False, force_non_windows=False):
     if (isWindows or force_windows) and not force_non_windows:
@@ -447,6 +452,7 @@ def ParseCommandLine():
     parser.add_argument("-t", "--tsv", help="Select an alternative pico_configs.tsv file", default=GetFilePath("pico_configs.tsv"))
     parser.add_argument("-o", "--output", help="Set an alternative CMakeList.txt filename", default="CMakeLists.txt")
     parser.add_argument("-x", "--examples", action='store_true', help="Add example code for the Pico standard library")
+    parser.add_argument("-ux", "--uartExample", action='store_true', help="Add example code for UART support with the Pico SDK")
     parser.add_argument("-l", "--list", action='store_true', help="List available features")
     parser.add_argument("-c", "--configs", action='store_true', help="List available project configuration items")
     parser.add_argument("-f", "--feature", action='append', help="Add feature to generated project")
@@ -457,6 +463,7 @@ def ParseCommandLine():
     parser.add_argument("-g", "--gui", action='store_true', help="Run a GUI version of the project generator")
     parser.add_argument("-p", "--project", action='append', help="Generate projects files for IDE. Options are: vscode")
     parser.add_argument("-r", "--runFromRAM", action='store_true', help="Run the program from RAM rather than flash")
+    parser.add_argument("-e", "--entryProjName", action='store_true', help="Use project name as entry point file name")
     parser.add_argument("-uart", "--uart", action='store_true', default=1, help="Console output to UART (default)")
     parser.add_argument("-nouart", "--nouart", action='store_true', default=0, help="Disable console output to UART")
     parser.add_argument("-usb", "--usb", action='store_true', help="Console output to USB (disables other USB functionality")
@@ -473,18 +480,20 @@ def ParseCommandLine():
     parser.add_argument("-picotoolVersion", "--picotoolVersion", help="Picotool version to use (required)")
     parser.add_argument("-np", "--ninjaPath", help="Ninja path")
     parser.add_argument("-cmp", "--cmakePath", help="CMake path")
-    parser.add_argument("-cupy", "--customPython", action='store_true', help="Custom python path used to execute the script.")
     parser.add_argument("-openOCDVersion", "--openOCDVersion", help="OpenOCD version to use - defaults to 0", default=0)
+    parser.add_argument("-examLibs", "--exampleLibs", action='append', help="Include an examples library in the folder")
+    parser.add_argument("-ucmt", "--useCmakeTools", action='store_true', help="Enable CMake Tools extension integration")
 
     return parser.parse_args()
 
 
-def GenerateMain(folder, projectName, features, cpp):
+def GenerateMain(folder, projectName, features, cpp, wantEntryProjName):
 
+    executableName = projectName if wantEntryProjName else "main"
     if cpp:
-        filename = Path(folder) / (projectName + '.cpp')
+        filename = Path(folder) / (executableName + '.cpp')
     else:
-        filename = Path(folder) / (projectName + '.c')
+        filename = Path(folder) / (executableName + '.c')
 
     file = open(filename, 'w')
 
@@ -561,14 +570,9 @@ def GenerateMain(folder, projectName, features, cpp):
 
 
 def GenerateCMake(folder, params):
-   
     filename = Path(folder) / CMAKELIST_FILENAME
     projectName = params['projectName']
     board_type = params['boardtype']
-
-    # OK, for the path, CMake will accept forward slashes on Windows, and thats
-    # seemingly a bit easier to handle than the backslashes
-    p = str(params['sdkPath']).replace('\\','/')
 
     cmake_header1 = (f"# Generated Cmake Pico project file\n\n"
                  "cmake_minimum_required(VERSION 3.13)\n\n"
@@ -578,69 +582,38 @@ def GenerateCMake(folder, params):
                  "# Initialise pico_sdk from installed location\n"
                  "# (note this can come from environment, CMake cache etc)\n\n"
                 )
-    
+
     # if you change the do never edit headline you need to change the check for it in extension.mts
-    cmake_header_us_1_5_1 = (
-                "# == DO NEVER EDIT THE NEXT LINES for Raspberry Pi Pico VS Code Extension to work ==\n"
-                "if(WIN32)\n"
-                "   set(USERHOME $ENV{USERPROFILE})\n"
-                "else()\n"
-                "    set(USERHOME $ENV{HOME})\n"
-                "endif()\n"
-                f"set(PICO_SDK_PATH {cmakeSdkPath(params['sdkVersion'])})\n"
-                f"set(PICO_TOOLCHAIN_PATH {cmakeToolchainPath(params['toolchainVersion'])})\n"
-                "if(WIN32)\n"
-                f"    set(pico-sdk-tools_DIR {cmakeToolsPath(params['sdkVersion'])})\n"
-                "    include(${pico-sdk-tools_DIR}/pico-sdk-tools-config.cmake)\n"
-                "    include(${pico-sdk-tools_DIR}/pico-sdk-tools-config-version.cmake)\n"
-                "endif()\n"
-                "# ====================================================================================\n"
-                )
     cmake_header_us = (
                 "# == DO NEVER EDIT THE NEXT LINES for Raspberry Pi Pico VS Code Extension to work ==\n"
                 "if(WIN32)\n"
-                "   set(USERHOME $ENV{USERPROFILE})\n"
+                "    set(USERHOME $ENV{USERPROFILE})\n"
                 "else()\n"
                 "    set(USERHOME $ENV{HOME})\n"
                 "endif()\n"
-                f"set(PICO_SDK_PATH {cmakeSdkPath(params['sdkVersion'])})\n"
-                f"set(PICO_TOOLCHAIN_PATH {cmakeToolchainPath(params['toolchainVersion'])})\n"
-                f"set(pioasm_HINT {cmakeToolsPath(params['sdkVersion'])}/pioasm)\n"
-                "if(EXISTS ${pioasm_HINT})\n"
-                "    set(pioasm_DIR ${pioasm_HINT})\n"
-                "endif()\n"
-                f"set(picotool_HINT {cmakePicotoolPath(params['picotoolVersion'])}/picotool)\n"
-                "if(EXISTS ${picotool_HINT})\n"
-                "    set(picotool_DIR ${picotool_HINT})\n"
-                "endif()\n"
-                "if(PICO_TOOLCHAIN_PATH MATCHES \"RISCV\")\n"
-                "    set(PICO_PLATFORM rp2350-riscv CACHE STRING \"Pico Platform\")\n"
-                "    if(PICO_TOOLCHAIN_PATH MATCHES \"COREV\")\n"
-                "        set(PICO_COMPILER pico_riscv_gcc_zcb_zcmp)\n"
-                "    endif()\n"
+                f"set(sdkVersion {params['sdkVersion']})\n"
+                f"set(toolchainVersion {params['toolchainVersion']})\n"
+                f"set(picotoolVersion {params['picotoolVersion']})\n"
+                f"set(picoVscode {cmakeIncPath()})\n"
+                "if (EXISTS ${picoVscode})\n"
+                "    include(${picoVscode})\n"
                 "endif()\n"
                 "# ====================================================================================\n"
                 )
 
-    # Use old header for version less than 2.0.0
-    if params['sdkVersion'].split(".")[0] < "2":
-        cmake_header_us = cmake_header_us_1_5_1
     cmake_header2 = (
                  f"set(PICO_BOARD {board_type} CACHE STRING \"Board type\")\n\n"
                  "# Pull in Raspberry Pi Pico SDK (must be before project)\n"
                  "include(pico_sdk_import.cmake)\n\n"
-                 "if (PICO_SDK_VERSION_STRING VERSION_LESS \"1.4.0\")\n"
-                 "  message(FATAL_ERROR \"Raspberry Pi Pico SDK version 1.4.0 (or later) required. Your version is ${PICO_SDK_VERSION_STRING}\")\n"
-                 "endif()\n\n"
                  f"project({projectName} C CXX ASM)\n"
                 )
-    
+
     cmake_header3 = (
                 "\n# Initialise the Raspberry Pi Pico SDK\n"
                 "pico_sdk_init()\n\n"
                 "# Add executable. Default name is the project name, version 0.1\n\n"
                 )
-    
+
 
     if params['wantConvert']:
         with open(filename, 'r+') as file:
@@ -662,23 +635,28 @@ def GenerateCMake(folder, params):
                 # Get project name
                 for line in lines:
                     if "add_executable" in line:
-                        newProjectName = line.split('(')[1].split()[0].strip().strip("()")
                         if params["wantThreadsafeBackground"] or params["wantPoll"]:
+                            newProjectName = line.split('(')[1].split()[0].strip().strip("()")
                             newProjectName = newProjectName.replace("_background", "")
                             newProjectName = newProjectName.replace("_poll", "")
-                        print("New project name", newProjectName)
-                        cmake_header2 = cmake_header2.replace(projectName, newProjectName)
+                            print("New project name", newProjectName)
+                            cmake_header2 = cmake_header2.replace(projectName, newProjectName)
                 # Write all headers
                 file.write(cmake_header1)
                 file.write(cmake_header_us)
                 file.write(cmake_header2)
                 file.write(cmake_header3)
+                for lib in params["exampleLibs"]:
+                    file.write(f"add_subdirectory({lib})\n")
                 file.flush()
                 # Remove example_auto_set_url
                 for i, line in enumerate(lines):
                     if "example_auto_set_url" in line:
                         lines[i] = ""
                         print("Removed", line, lines[i])
+                    if "target_link_libraries" in line:
+                        for lib in params["exampleLibs"]:
+                            lines[i] += f"  {lib}\n"
                 file.writelines(lines)
         return
 
@@ -708,15 +686,14 @@ def GenerateCMake(folder, params):
             file.write(f'add_compile_definitions({c} = {v})\n')
         file.write('\n')
 
-    # No GUI/command line to set a different executable name at this stage
-    executableName = projectName
+    entry_point_file_name = projectName if params['wantEntryProjName'] else "main"
 
     if params['wantCPP']:
-        file.write(f'add_executable({projectName} {projectName}.cpp )\n\n')
+        file.write(f'add_executable({projectName} {entry_point_file_name}.cpp )\n\n')
     else:
-        file.write(f'add_executable({projectName} {projectName}.c )\n\n')
+        file.write(f'add_executable({projectName} {entry_point_file_name}.c )\n\n')
 
-    file.write(f'pico_set_program_name({projectName} "{executableName}")\n')
+    file.write(f'pico_set_program_name({projectName} "{projectName}")\n')
     file.write(f'pico_set_program_version({projectName} "0.1")\n\n')
 
     if params['wantRunFromRAM']:
@@ -768,7 +745,6 @@ def GenerateCMake(folder, params):
     file.write('# Add the standard include files to the build\n')
     file.write(f'target_include_directories({projectName} PRIVATE\n')
     file.write("  ${CMAKE_CURRENT_LIST_DIR}\n")
-    file.write("  ${CMAKE_CURRENT_LIST_DIR}/.. # for our common lwipopts or any other standard includes, if required\n")
     file.write(')\n\n')
 
     # Selected libraries/features
@@ -788,11 +764,17 @@ def GenerateCMake(folder, params):
 
 
 # Generates the requested project files, if any
-def generateProjectFiles(projectPath, projectName, sdkPath, projects, debugger, sdkVersion, toolchainVersion, picotoolVersion, ninjaPath, cmakePath, customPython, openOCDVersion):
+def generateProjectFiles(projectPath, projectName, sdkPath, projects, debugger, sdkVersion, toolchainVersion, picotoolVersion, ninjaPath, cmakePath, openOCDVersion, useCmakeTools):
 
     oldCWD = os.getcwd()
 
     os.chdir(projectPath)
+
+    # Add a simple .gitignore file if there isn't one
+    if not os.path.isfile(".gitignore"):
+        file = open(".gitignore", "w")
+        file.write("build\n")
+        file.close()
 
     debugger = debugger_config_list[debugger]
 
@@ -828,12 +810,12 @@ def generateProjectFiles(projectPath, projectName, sdkPath, projects, debugger, 
             "servertype": "openocd",\
 {f'{server_path}: "{openocd_path}",' if openocd_path else ""}
             "gdbPath": "${{command:raspberry-pi-pico.getGDBPath}}",
-            "device": "${{command:raspberry-pi-pico.getChip}}",
+            "device": "${{command:raspberry-pi-pico.getChipUppercase}}",
             "configFiles": [
                 "{debugger}",
                 "target/${{command:raspberry-pi-pico.getTarget}}.cfg"
             ],
-            "svdFile": "{codeSdkPath(sdkVersion)}/src/${{command:raspberry-pi-pico.getChip}}/hardware_regs/${{command:raspberry-pi-pico.getChip}}.svd",
+            "svdFile": "{codeSdkPath(sdkVersion)}/src/${{command:raspberry-pi-pico.getChip}}/hardware_regs/${{command:raspberry-pi-pico.getChipUppercase}}.svd",
             "runToEntryPoint": "main",
             // Fix for no_flash binaries, where monitor reset halt doesn't do what is expected
             // Also works fine for flash binaries
@@ -854,13 +836,14 @@ def generateProjectFiles(projectPath, projectName, sdkPath, projects, debugger, 
             "servertype": "external",
             "gdbTarget": "localhost:3333",
             "gdbPath": "${{command:raspberry-pi-pico.getGDBPath}}",
-            "device": "${{command:raspberry-pi-pico.getChip}}",
-            "svdFile": "{codeSdkPath(sdkVersion)}/src/${{command:raspberry-pi-pico.getChip}}/hardware_regs/${{command:raspberry-pi-pico.getChip}}.svd",
+            "device": "${{command:raspberry-pi-pico.getChipUppercase}}",
+            "svdFile": "{codeSdkPath(sdkVersion)}/src/${{command:raspberry-pi-pico.getChip}}/hardware_regs/${{command:raspberry-pi-pico.getChipUppercase}}.svd",
             "runToEntryPoint": "main",
-            // Give restart the same functionality as runToEntryPoint - main
-            "postRestartCommands": [
-                "break main",
-                "continue"
+            // Fix for no_flash binaries, where monitor reset halt doesn't do what is expected
+            // Also works fine for flash binaries
+            "overrideLaunchCommands": [
+                "monitor reset init",
+                "load \\"${{command:raspberry-pi-pico.launchTargetPath}}\\""
             ]
         }},
         {{
@@ -881,7 +864,7 @@ def generateProjectFiles(projectPath, projectName, sdkPath, projects, debugger, 
                 "limit": 4
             }},
             "preLaunchTask": "Flash",
-            "svdPath": "{codeSdkPath(sdkVersion)}/src/${{command:raspberry-pi-pico.getChip}}/hardware_regs/${{command:raspberry-pi-pico.getChip}}.svd"
+            "svdPath": "{codeSdkPath(sdkVersion)}/src/${{command:raspberry-pi-pico.getChip}}/hardware_regs/${{command:raspberry-pi-pico.getChipUppercase}}.svd"
         }},
     ]
 }}
@@ -912,17 +895,14 @@ def generateProjectFiles(projectPath, projectName, sdkPath, projects, debugger, 
 }}
 '''
 
-            pythonExe = sys.executable.replace("\\", "/").replace(user_home, "${HOME}") if use_home_var else sys.executable
-
             # kits
             kits = f'''[
     {{
         "name": "Pico",
         "compilers": {{
-            "C": "{cPath}",
-            "CXX": "{cPath}"
+            "C": "${{command:raspberry-pi-pico.getCompilerPath}}",
+            "CXX": "${{command:raspberry-pi-pico.getCompilerPath}}"
         }},
-        "toolchainFile": "{propertiesSdkPath(sdkVersion)}/cmake/preload/toolchains/{CMAKE_TOOLCHAIN_NAME}",
         "environmentVariables": {{
             "PATH": "${{command:raspberry-pi-pico.getEnvPath}};${{env:PATH}}"
         }},
@@ -946,9 +926,9 @@ def generateProjectFiles(projectPath, projectName, sdkPath, projects, debugger, 
             "statusBarVisibility": "hidden"
         }}
     }},
-    "cmake.configureOnEdit": false,
-    "cmake.automaticReconfigure": false,
-    "cmake.configureOnOpen": false,
+    "cmake.configureOnEdit": {"true" if useCmakeTools else "false"},
+    "cmake.automaticReconfigure": {"true" if useCmakeTools else "false"},
+    "cmake.configureOnOpen": {"true" if useCmakeTools else "false"},
     "cmake.generator": "Ninja",
     "cmake.cmakePath": "{cmakePath.replace(user_home, "${userHome}") if use_home_var else cmakePath}",
     "C_Cpp.debugShortcut": false,
@@ -982,14 +962,10 @@ ${{env:PATH}}"
 {os.path.dirname(ninjaPath.replace(user_home, "${env:HOME}") if use_home_var else ninjaPath)}:\
 ${{env:PATH}}"
     }},
-    "raspberry-pi-pico.cmakeAutoConfigure": true,
-    "raspberry-pi-pico.useCmakeTools": false,
+    "raspberry-pi-pico.cmakeAutoConfigure": {"false" if useCmakeTools else "true"},
+    "raspberry-pi-pico.useCmakeTools": {"true" if useCmakeTools else "false"},
     "raspberry-pi-pico.cmakePath": "{cmakePath.replace(user_home, "${HOME}") if use_home_var else cmakePath}",
     "raspberry-pi-pico.ninjaPath": "{ninjaPath.replace(user_home, "${HOME}") if use_home_var else ninjaPath}"'''
-
-            if customPython:
-                settings += f''',
-    "raspberry-pi-pico.python3Path": "{pythonExe}"'''
                 
             settings += '\n}\n'
 
@@ -1167,13 +1143,18 @@ def DoEverything(parent, params):
     if params['features']:
         features_and_examples = params['features'][:]
     else:
-        features_and_examples= []
+        features_and_examples = []
 
     if params['wantExamples']:
         features_and_examples = list(stdlib_examples_list.keys()) + features_and_examples
 
+    if params['wantUARTExample']:
+        # add uart to features_and_examples if not present
+        if "uart" not in features_and_examples:
+            features_and_examples.append("uart")
+
     if not (params['wantConvert']):
-        GenerateMain(projectPath, params['projectName'], features_and_examples, params['wantCPP'])
+        GenerateMain(projectPath, params['projectName'], features_and_examples, params['wantCPP'], params['wantEntryProjName'])
 
         # If we have any ancilliary files, copy them to our project folder
         # Currently only the picow with lwIP support needs an extra file, so just check that list
@@ -1211,19 +1192,19 @@ def DoEverything(parent, params):
     if isWindows:
         if shutil.which("ninja") or (params["ninjaPath"] != None and params["ninjaPath"] != ""):
             # When installing SDK version 1.5.0 on windows with installer pico-setup-windows-x64-standalone.exe, ninja is used 
-            cmakeCmd = params['cmakePath'] + ' -DCMAKE_BUILD_TYPE=Debug -G Ninja ..'
+            cmakeCmd = params['cmakePath'] + ' -G Ninja ..'
             makeCmd = params['ninjaPath'] + ' '        
         else:
             # Everything else assume nmake
-            cmakeCmd = params['cmakePath'] + ' -DCMAKE_BUILD_TYPE=Debug -G "NMake Makefiles" ..'
+            cmakeCmd = params['cmakePath'] + ' -G "NMake Makefiles" ..'
             makeCmd = 'nmake '
     else:
         # Ninja now works OK under Linux, so if installed use it by default. It's faster.
         if shutil.which("ninja") or (params["ninjaPath"] != None and params["ninjaPath"] != ""):
-            cmakeCmd = params['cmakePath'] + ' -DCMAKE_BUILD_TYPE=Debug -G Ninja ..'
+            cmakeCmd = params['cmakePath'] + ' -G Ninja ..'
             makeCmd = params['ninjaPath'] + ' '
         else:
-            cmakeCmd = params['cmakePath'] + ' -DCMAKE_BUILD_TYPE=Debug ..'
+            cmakeCmd = params['cmakePath'] + ' ..'
             makeCmd = 'make -j' + str(cpus)
 
     os.system(cmakeCmd)
@@ -1247,8 +1228,8 @@ def DoEverything(parent, params):
             params["picotoolVersion"], 
             params["ninjaPath"], 
             params["cmakePath"],
-            params["customPython"],
-            params["openOCDVersion"])
+            params["openOCDVersion"],
+            params['useCmakeTools'])
 
     if params['wantBuild']:
         os.system(makeCmd)
@@ -1260,116 +1241,120 @@ def DoEverything(parent, params):
 ###################################################################################
 # main execution starteth here
 
-sourcefolder = os.path.dirname(os.path.abspath(__file__))
+if __name__ == "__main__":
+    sourcefolder = os.path.dirname(os.path.abspath(__file__))
 
-args = ParseCommandLine()
+    args = ParseCommandLine()
 
-if args.nouart:
-    args.uart = False
+    if args.nouart:
+        args.uart = False
 
-if args.debugger > len(debugger_list) - 1:
-    args.debugger = 0
+    if args.debugger > len(debugger_list) - 1:
+        args.debugger = 0
 
-if "RISCV" in args.toolchainVersion:
-    if "COREV" in args.toolchainVersion:
-        COMPILER_TRIPLE = COREV_TRIPLE
+    if "RISCV" in args.toolchainVersion:
+        if "COREV" in args.toolchainVersion:
+            COMPILER_TRIPLE = COREV_TRIPLE
+        else:
+            COMPILER_TRIPLE = RISCV_TRIPLE
+
+    # Check we have everything we need to compile etc
+    c = CheckPrerequisites()
+
+    ## TODO Do both warnings in the same error message so user does have to keep coming back to find still more to do
+
+    if c == None:
+        m = f'Unable to find the `{COMPILER_NAME()}` compiler\n'
+        m +='You will need to install an appropriate compiler to build a Raspberry Pi Pico project\n'
+        m += 'See the Raspberry Pi Pico documentation for how to do this on your particular platform\n'
+
+        print(m)
+        sys.exit(-1)
+
+    if args.name == None and not args.gui and not args.list and not args.configs and not args.boardlist:
+        print("No project name specfied\n")
+        sys.exit(-1)
+
+    # Check if we were provided a compiler path, and override the default if so
+    if args.cpath:
+        compilerPath = Path(args.cpath)
+    elif args.toolchainVersion:
+        compilerPath = Path(codeToolchainPath(args.toolchainVersion)+"/bin/"+COMPILER_NAME())
     else:
-        COMPILER_TRIPLE = RISCV_TRIPLE
+        compilerPath = Path(c)
 
-# Check we have everything we need to compile etc
-c = CheckPrerequisites()
+    # load/parse any configuration dictionary we may have
+    LoadConfigurations()
 
-## TODO Do both warnings in the same error message so user does have to keep coming back to find still more to do
+    p = CheckSDKPath(args.gui)
 
-if c == None:
-    m = f'Unable to find the `{COMPILER_NAME()}` compiler\n'
-    m +='You will need to install an appropriate compiler to build a Raspberry Pi Pico project\n'
-    m += 'See the Raspberry Pi Pico documentation for how to do this on your particular platform\n'
+    if p == None:
+        sys.exit(-1)
 
-    print(m)
-    sys.exit(-1)
+    sdkPath = Path(p)
 
-if args.name == None and not args.gui and not args.list and not args.configs and not args.boardlist:
-    print("No project name specfied\n")
-    sys.exit(-1)
+    boardtype_list = LoadBoardTypes(sdkPath)
+    boardtype_list.sort()
 
-# Check if we were provided a compiler path, and override the default if so
-if args.cpath:
-    compilerPath = Path(args.cpath)
-elif args.toolchainVersion:
-    compilerPath = Path(codeToolchainPath(args.toolchainVersion)+"/bin/"+COMPILER_NAME())
-else:
-    compilerPath = Path(c)
+    projectRoot = Path(os.getcwd()) if not args.projectRoot else Path(args.projectRoot)
 
-# load/parse any configuration dictionary we may have
-LoadConfigurations()
+    if args.list or args.configs or args.boardlist:
+        if args.list:
+            print("Available project features:\n")
+            for feat in features_list:
+                print(feat.ljust(6), '\t', features_list[feat][GUI_TEXT])
+            print('\n')
 
-p = CheckSDKPath(args.gui)
+        if args.configs:
+            print("Available project configuration items:\n")
+            for conf in configuration_dictionary:
+                print(conf['name'].ljust(40), '\t', conf['description'])
+            print('\n')
 
-if p == None:
-    sys.exit(-1)
+        if args.boardlist:
+            print("Available board types:\n")
+            for board in boardtype_list:
+                print(board)
+            print('\n')
 
-sdkPath = Path(p)
+        sys.exit(0)
+    else :
+        params={
+            'sdkPath'       : sdkPath,
+            'projectRoot'   : projectRoot,
+            'projectName'   : args.name,
+            'wantGUI'       : False,
+            'wantOverwrite' : args.overwrite,
+            'wantConvert'   : args.convert or args.example,
+            'wantExample'   : args.example,
+            'wantThreadsafeBackground'  : False,
+            'wantPoll'                  : False,
+            'boardtype'     : args.boardtype,
+            'wantBuild'     : args.build,
+            'features'      : args.feature,
+            'projects'      : args.project,
+            'configs'       : (),
+            'wantRunFromRAM': args.runFromRAM,
+            'wantEntryProjName': args.entryProjName,
+            'wantExamples'  : args.examples,
+            'wantUARTExample': args.uartExample,
+            'wantUART'      : args.uart,
+            'wantUSB'       : args.usb,
+            'wantCPP'       : args.cpp,
+            'debugger'      : args.debugger,
+            'exceptions'    : args.cppexceptions,
+            'rtti'          : args.cpprtti,
+            'ssid'          : '',
+            'password'      : '',
+            'sdkVersion'    : args.sdkVersion,
+            'toolchainVersion': args.toolchainVersion,
+            'picotoolVersion': args.picotoolVersion,
+            'ninjaPath'     : args.ninjaPath,
+            'cmakePath'     : args.cmakePath,
+            'openOCDVersion': args.openOCDVersion,
+            'exampleLibs'   : args.exampleLibs if args.exampleLibs is not None else [],
+            'useCmakeTools' : args.useCmakeTools
+            }
 
-boardtype_list = LoadBoardTypes(sdkPath)
-boardtype_list.sort()
-
-projectRoot = Path(os.getcwd()) if not args.projectRoot else Path(args.projectRoot)
-
-if args.list or args.configs or args.boardlist:
-    if args.list:
-        print("Available project features:\n")
-        for feat in features_list:
-            print(feat.ljust(6), '\t', features_list[feat][GUI_TEXT])
-        print('\n')
-
-    if args.configs:
-        print("Available project configuration items:\n")
-        for conf in configuration_dictionary:
-            print(conf['name'].ljust(40), '\t', conf['description'])
-        print('\n')
-
-    if args.boardlist:
-        print("Available board types:\n")
-        for board in boardtype_list:
-            print(board)
-        print('\n')
-
-    sys.exit(0)
-else :
-    params={
-        'sdkPath'       : sdkPath,
-        'projectRoot'   : projectRoot,
-        'projectName'   : args.name,
-        'wantGUI'       : False,
-        'wantOverwrite' : args.overwrite,
-        'wantConvert'   : args.convert or args.example,
-        'wantExample'   : args.example,
-        'wantThreadsafeBackground'  : False,
-        'wantPoll'                  : False,
-        'boardtype'     : args.boardtype,
-        'wantBuild'     : args.build,
-        'features'      : args.feature,
-        'projects'      : args.project,
-        'configs'       : (),
-        'wantRunFromRAM': args.runFromRAM,
-        'wantExamples'  : args.examples,
-        'wantUART'      : args.uart,
-        'wantUSB'       : args.usb,
-        'wantCPP'       : args.cpp,
-        'debugger'      : args.debugger,
-        'exceptions'    : args.cppexceptions,
-        'rtti'          : args.cpprtti,
-        'ssid'          : '',
-        'password'      : '',
-        'sdkVersion'    : args.sdkVersion,
-        'toolchainVersion': args.toolchainVersion,
-        'picotoolVersion': args.picotoolVersion,
-        'ninjaPath'     : args.ninjaPath,
-        'cmakePath'     : args.cmakePath,
-        'customPython'  : args.customPython,
-        'openOCDVersion': args.openOCDVersion
-        }
-
-    DoEverything(None, params)
-    sys.exit(0)
+        DoEverything(None, params)
+        sys.exit(0)

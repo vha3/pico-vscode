@@ -9,7 +9,7 @@ import {
 } from "vscode";
 import Logger from "../logger.mjs";
 import { extensionName } from "../commands/command.mjs";
-import NewProjectCommand from "../commands/newProject.mjs";
+import NewProjectCommand, { ProjectLang } from "../commands/newProject.mjs";
 import CompileProjectCommand from "../commands/compileProject.mjs";
 import RunProjectCommand from "../commands/runProject.mjs";
 import SwitchSDKCommand from "../commands/switchSDK.mjs";
@@ -19,10 +19,13 @@ import OpenSdkDocumentationCommand, {
   DOCUMENTATION_LABEL_BY_ID,
   DocumentationId,
 } from "../commands/openSdkDocumentation.mjs";
-import ConfigureCmakeCommand from "../commands/configureCmake.mjs";
+import ConfigureCmakeCommand, {
+  CleanCMakeCommand,
+} from "../commands/configureCmake.mjs";
 import ImportProjectCommand from "../commands/importProject.mjs";
 import NewExampleProjectCommand from "../commands/newExampleProject.mjs";
 import SwitchBoardCommand from "../commands/switchBoard.mjs";
+import FlashProjectSWDCommand from "../commands/flashProjectSwd.mjs";
 
 export class QuickAccessCommand extends TreeItem {
   constructor(
@@ -38,14 +41,17 @@ const COMMON_COMMANDS_PARENT_LABEL = "General";
 const PROJECT_COMMANDS_PARENT_LABEL = "Project";
 const DOCUMENTATION_COMMANDS_PARENT_LABEL = "Documentation";
 
-const NEW_PROJECT_LABEL = "New Project";
+const NEW_C_CPP_PROJECT_LABEL = "New C/C++ Project";
+const NEW_MICROPYTHON_PROJECT_LABEL = "New MicroPython Project";
 const IMPORT_PROJECT_LABEL = "Import Project";
 const EXAMPLE_PROJECT_LABEL = "New Project From Example";
 const SWITCH_SDK_LABEL = "Switch SDK";
 const SWITCH_BOARD_LABEL = "Switch Board";
 const COMPILE_PROJECT_LABEL = "Compile Project";
-const RUN_PROJECT_LABEL = "Run Project";
+const RUN_PROJECT_LABEL = "Run Project (USB)";
+const FLASH_PROJECT_LABEL = "Flash Project (SWD)";
 const CONFIGURE_CMAKE_PROJECT_LABEL = "Configure CMake";
+const CLEAN_CMAKE_PROJECT_LABEL = "Clean CMake";
 const DEBUG_PROJECT_LABEL = "Debug Project";
 const DEBUG_LAYOUT_PROJECT_LABEL = "Debug Layout";
 
@@ -76,8 +82,11 @@ export class PicoProjectActivityBar
     element: QuickAccessCommand
   ): TreeItem | Thenable<TreeItem> {
     switch (element.label) {
-      case NEW_PROJECT_LABEL:
+      case NEW_C_CPP_PROJECT_LABEL:
         // alt. "new-folder"
+        element.iconPath = new ThemeIcon("file-directory-create");
+        break;
+      case NEW_MICROPYTHON_PROJECT_LABEL:
         element.iconPath = new ThemeIcon("file-directory-create");
         break;
       case IMPORT_PROJECT_LABEL:
@@ -99,9 +108,16 @@ export class PicoProjectActivityBar
       case RUN_PROJECT_LABEL:
         element.iconPath = new ThemeIcon("run");
         break;
+      case FLASH_PROJECT_LABEL:
+        element.iconPath = new ThemeIcon("desktop-download");
+        break;
       case CONFIGURE_CMAKE_PROJECT_LABEL:
         // alt. "gather"
         element.iconPath = new ThemeIcon("beaker");
+        break;
+      case CLEAN_CMAKE_PROJECT_LABEL:
+        // or "trash" or "sync"
+        element.iconPath = new ThemeIcon("squirrel");
         break;
       case SWITCH_SDK_LABEL:
         // repo-forked or extensions; alt. "replace-all"
@@ -153,11 +169,21 @@ export class PicoProjectActivityBar
     } else if (element.label === COMMON_COMMANDS_PARENT_LABEL) {
       return [
         new QuickAccessCommand(
-          NEW_PROJECT_LABEL,
+          NEW_C_CPP_PROJECT_LABEL,
           TreeItemCollapsibleState.None,
           {
             command: `${extensionName}.${NewProjectCommand.id}`,
-            title: NEW_PROJECT_LABEL,
+            title: NEW_C_CPP_PROJECT_LABEL,
+            arguments: [ProjectLang.cCpp],
+          }
+        ),
+        new QuickAccessCommand(
+          NEW_MICROPYTHON_PROJECT_LABEL,
+          TreeItemCollapsibleState.None,
+          {
+            command: `${extensionName}.${NewProjectCommand.id}`,
+            title: NEW_MICROPYTHON_PROJECT_LABEL,
+            arguments: [ProjectLang.micropython],
           }
         ),
         new QuickAccessCommand(
@@ -205,11 +231,27 @@ export class PicoProjectActivityBar
           }
         ),
         new QuickAccessCommand(
+          FLASH_PROJECT_LABEL,
+          TreeItemCollapsibleState.None,
+          {
+            command: `${extensionName}.${FlashProjectSWDCommand.id}`,
+            title: FLASH_PROJECT_LABEL,
+          }
+        ),
+        new QuickAccessCommand(
           CONFIGURE_CMAKE_PROJECT_LABEL,
           TreeItemCollapsibleState.None,
           {
             command: `${extensionName}.${ConfigureCmakeCommand.id}`,
             title: CONFIGURE_CMAKE_PROJECT_LABEL,
+          }
+        ),
+        new QuickAccessCommand(
+          CLEAN_CMAKE_PROJECT_LABEL,
+          TreeItemCollapsibleState.None,
+          {
+            command: `${extensionName}.${CleanCMakeCommand.id}`,
+            title: CLEAN_CMAKE_PROJECT_LABEL,
           }
         ),
         new QuickAccessCommand(

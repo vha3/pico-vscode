@@ -28,6 +28,7 @@ import {
   SDK_REPOSITORY_URL,
   getCmakeReleases,
   getNinjaReleases,
+  getPicotoolReleases,
   getSDKReleases,
 } from "../utils/githubREST.mjs";
 import {
@@ -42,7 +43,6 @@ import {
   downloadAndInstallToolchain,
   downloadAndInstallTools,
   downloadAndInstallPicotool,
-  downloadEmbedPython,
   getScriptsRoot,
 } from "../utils/download.mjs";
 import { compare } from "../utils/semverUtil.mjs";
@@ -52,34 +52,35 @@ import VersionBundlesLoader, {
 import which from "which";
 import { homedir } from "os";
 import { readFile } from "fs/promises";
-import { pyenvInstallPython, setupPyenv } from "../utils/pyenvUtil.mjs";
 import { existsSync, readdirSync } from "fs";
 import {
   type Example,
   loadExamples,
   setupExample,
 } from "../utils/examplesUtil.mjs";
+import { unknownErrorToString } from "../utils/errorHelper.mjs";
+import type { Progress as GotProgress } from "got";
+import findPython, { showPythonNotFoundError } from "../utils/pythonHelper.mjs";
 
 export const NINJA_AUTO_INSTALL_DISABLED = false;
 // process.platform === "linux" && process.arch === "arm64";
 
-export const picotoolVersion = "2.0.0";
 export const openOCDVersion = "0.12.0+dev";
 
 interface ImportProjectMessageValue {
   selectedSDK: string;
   selectedToolchain: string;
+  selectedPicotool: string;
   ninjaMode: number;
   ninjaPath: string;
   ninjaVersion: string;
   cmakeMode: number;
   cmakePath: string;
   cmakeVersion: string;
-  pythonMode: number;
-  pythonPath: string;
 
   // debugger
   debugger: number;
+  useCmakeTools: boolean;
 }
 
 interface SubmitExampleMessageValue extends ImportProjectMessageValue {
@@ -109,20 +110,20 @@ interface SubmitMessageValue extends ImportProjectMessageValue {
   picoWireless: number;
 
   // code generation options
-  addExamples: boolean;
+  addUartExample: boolean;
   runFromRAM: boolean;
+  entryPointProjectName: boolean;
   cpp: boolean;
   cppRtti: boolean;
   cppExceptions: boolean;
 }
 
-interface WebviewMessage {
+export interface WebviewMessage {
   command: string;
   value: object | string | SubmitMessageValue;
 }
 
 enum BoardType {
-  default = "default",
   pico = "pico",
   picoW = "pico_w",
   pico2 = "pico2",
@@ -153,8 +154,9 @@ enum PicoWirelessOption {
 }
 
 enum CodeOption {
-  addExamples = "Add examples from Pico library",
+  addUartExample = "Add UART example code",
   runFromRAM = "Run the program from RAM rather than flash",
+  entryPointProjectName = "Use project name as entry point file name",
   cpp = "Generate C++ code",
   cppRtti = "Enable C++ RTTI (Uses more memory)",
   cppExceptions = "Enable C++ exceptions (Uses more memory)",
@@ -230,10 +232,12 @@ function enumToParam(
       return "-f picow_poll";
     case PicoWirelessOption.picoWBackground:
       return "-f picow_background";
-    case CodeOption.addExamples:
-      return "-x";
+    case CodeOption.addUartExample:
+      return "-ux";
     case CodeOption.runFromRAM:
       return "-r";
+    case CodeOption.entryPointProjectName:
+      return "-e";
     case CodeOption.cpp:
       return "-cpp";
     case CodeOption.cppRtti:
@@ -263,14 +267,18 @@ interface ImportProjectOptions {
   ninjaExecutable: string;
   cmakeExecutable: string;
   debugger: Debugger;
+  useCmakeTools: boolean;
 }
 
 interface NewExampleBasedProjectOptions extends ImportProjectOptions {
   name: string;
+  libNames: [string];
   boardType: BoardType;
 }
 
-interface NewProjectOptions extends NewExampleBasedProjectOptions {
+interface NewProjectOptions extends ImportProjectOptions {
+  name: string;
+  boardType: BoardType;
   consoleOptions: ConsoleOption[];
   libraries: Array<Library | PicoWirelessOption>;
   codeOptions: CodeOption[];
@@ -374,10 +382,18 @@ export class NewProjectPanel {
 
     const settings = Settings.getInstance();
     if (settings === undefined) {
-      // TODO: maybe add restart button
-      void window.showErrorMessage(
-        "Failed to load settings. Please restart VSCode."
-      );
+      panel.dispose();
+
+      void window
+        .showErrorMessage(
+          "Failed to load settings. Please restart VS Code or reload the window.",
+          "Reload Window"
+        )
+        .then(selected => {
+          if (selected === "Reload Window") {
+            commands.executeCommand("workbench.action.reloadWindow");
+          }
+        });
 
       return;
     }
@@ -432,7 +448,9 @@ export class NewProjectPanel {
     this._isProjectImport = isProjectImport;
     // set local property as it's an indicator for initial projectRoot update
     // later during webview initialization
-    projectUri = projectUri ?? this._settings.getLastProjectRoot();
+    projectUri =
+      projectUri ??
+      (isProjectImport ? undefined : this._settings.getLastProjectRoot());
     this._projectRoot = projectUri;
     this._isCreateFromExampleOnly = createFromExample;
 
@@ -475,7 +493,9 @@ export class NewProjectPanel {
               if (newLoc && newLoc[0]) {
                 // overwrite preview folderUri
                 this._projectRoot = newLoc[0];
-                await this._settings.setLastProjectRoot(newLoc[0]);
+                if (!this._isProjectImport) {
+                  await this._settings.setLastProjectRoot(newLoc[0]);
+                }
 
                 // update webview
                 await this._panel.webview.postMessage({
@@ -493,10 +513,7 @@ export class NewProjectPanel {
                   message.value as string
                 );
               // change toolchain version on arm64 linux, as Core-V not available for that
-              let riscvToolchain = versionBundle?.riscvToolchain;
-              if (process.platform === "linux" && process.arch === "arm64") {
-                riscvToolchain = "RISCV_RPI";
-              }
+              const riscvToolchain = versionBundle?.riscvToolchain;
               // return result in message of command versionBundleAvailableTest
               await this._panel.webview.postMessage({
                 command: "versionBundleAvailableTest",
@@ -521,7 +538,9 @@ export class NewProjectPanel {
                 this._projectRoot.fsPath === ""
               ) {
                 void window.showErrorMessage(
-                  "No project root selected. Please select a project root."
+                  this._isProjectImport
+                    ? "No project to import selected. Please select a project folder."
+                    : "No project root selected. Please select a project root."
                 );
                 await this._panel.webview.postMessage({
                   command: "submitDenied",
@@ -573,7 +592,7 @@ export class NewProjectPanel {
                   title: `Importing project ${projectFolderName} from ${this._projectRoot?.fsPath}, this may take a while...`,
                 },
                 async progress =>
-                  this._generateProjectOperation(progress, data, message, false)
+                  this._generateProjectOperation(progress, data, message)
               );
             }
             break;
@@ -627,7 +646,10 @@ export class NewProjectPanel {
 
               const result = await setupExample(
                 example,
-                this._projectRoot.fsPath.replaceAll("\\", "/")
+                // required to support backslashes in macOS/Linux folder names
+                process.platform !== "win32"
+                  ? this._projectRoot.fsPath
+                  : this._projectRoot.fsPath.replaceAll("\\", "/")
               );
 
               if (!result) {
@@ -646,7 +668,12 @@ export class NewProjectPanel {
                   }, this may take a while...`,
                 },
                 async progress =>
-                  this._generateProjectOperation(progress, data, message, true)
+                  this._generateProjectOperation(
+                    progress,
+                    data,
+                    message,
+                    example
+                  )
               );
             }
             break;
@@ -661,6 +688,15 @@ export class NewProjectPanel {
                 void window.showErrorMessage(
                   "No project root selected. Please select a project root."
                 );
+                await this._panel.webview.postMessage({
+                  command: "submitDenied",
+                });
+
+                return;
+              }
+
+              if (data.projectName === undefined || data.projectName === "") {
+                void window.showWarningMessage("Project name cannot be empty.");
                 await this._panel.webview.postMessage({
                   command: "submitDenied",
                 });
@@ -708,7 +744,7 @@ export class NewProjectPanel {
       // update webview
       void this._panel.webview.postMessage({
         command: "changeLocation",
-        value: projectUri?.fsPath,
+        value: projectUri.fsPath,
       });
     }
   }
@@ -720,7 +756,7 @@ export class NewProjectPanel {
       | SubmitExampleMessageValue
       | ImportProjectMessageValue,
     message: WebviewMessage,
-    exampleBased: boolean = false
+    example?: Example
   ): Promise<void> {
     const projectPath = this._projectRoot?.fsPath ?? "";
 
@@ -736,6 +772,7 @@ export class NewProjectPanel {
       const selectedToolchain = this._supportedToolchains?.find(
         tc => tc.version === data.selectedToolchain.replaceAll(".", "_")
       );
+      const selectedPicotool = data.selectedPicotool.slice(0);
 
       if (!selectedToolchain) {
         void window.showErrorMessage("Failed to find selected toolchain.");
@@ -751,128 +788,60 @@ export class NewProjectPanel {
       if (
         this._versionBundle === undefined &&
         // if no versionBundle then all version options the could be dependent on it must be custom (=> independent of versionBundle)
-        (data.pythonMode === 0 || data.ninjaMode === 0 || data.cmakeMode === 0)
+        (data.ninjaMode === 0 || data.cmakeMode === 0)
       ) {
         progress.report({
           message: "Failed",
           increment: 100,
         });
-        await window.showErrorMessage("Failed to find selected SDK version.");
+        void window.showErrorMessage("Failed to find selected SDK version.");
 
         return;
       }
 
       // install python (if necessary)
-      let python3Path: string | undefined;
-      if (process.platform === "darwin" || process.platform === "win32") {
-        switch (data.pythonMode) {
-          case 0: {
-            const versionBundle = this._versionBundle;
-            await window.withProgress(
-              {
-                location: ProgressLocation.Notification,
-                title:
-                  "Download and installing Python. This may take a while...",
-                cancellable: false,
-              },
-              async progress2 => {
-                if (process.platform === "win32") {
-                  // ! because data.pythonMode === 0 => versionBundle !== undefined
-                  python3Path = await downloadEmbedPython(versionBundle!);
-                } else if (process.platform === "darwin") {
-                  const result1 = await setupPyenv();
-                  if (!result1) {
-                    progress2.report({
-                      increment: 100,
-                    });
+      const python3Path = await findPython();
+      if (!python3Path) {
+        progress.report({
+          message: "Failed",
+          increment: 100,
+        });
+        this._logger.error("Failed to find Python3 executable.");
+        showPythonNotFoundError();
 
-                    return;
-                  }
-                  const result = await pyenvInstallPython(
-                    versionBundle!.python.version
-                  );
-
-                  if (result !== null) {
-                    python3Path = result;
-                  }
-                } else {
-                  this._logger.error(
-                    "Automatic Python installation is only supported on Windows and macOS."
-                  );
-
-                  await window.showErrorMessage(
-                    "Automatic Python installation is only supported on Windows and macOS."
-                  );
-                }
-                progress2.report({
-                  increment: 100,
-                });
-              }
-            );
-            break;
-          }
-          case 1:
-            python3Path = process.platform === "win32" ? "python" : "python3";
-            break;
-          case 2:
-            python3Path = data.pythonPath;
-            break;
-        }
-
-        if (python3Path === undefined) {
-          progress.report({
-            message: "Failed",
-            increment: 100,
-          });
-          await window.showErrorMessage("Failed to find python3 executable.");
-
-          return;
-        }
-      } else {
-        python3Path = "python3";
+        return;
       }
 
       // install selected sdk and toolchain if necessary
       // show user feedback as downloads can take a while
-      let installedSuccessfully = false;
+      let installedSuccessfully = true;
       await window.withProgress(
         {
           location: ProgressLocation.Notification,
-          title: "Downloading SDK and Toolchain",
+          title: "Downloading and installing SDK",
           cancellable: false,
         },
         async progress2 => {
-          // download both
-          if (
-            !(await downloadAndInstallSDK(
-              selectedSDK,
-              SDK_REPOSITORY_URL,
-              // python3Path is only possible undefined if downloaded and there is already checked and returned if this happened
-              python3Path!.replace(HOME_VAR, homedir().replaceAll("\\", "/"))
-            )) ||
-            !(await downloadAndInstallToolchain(selectedToolchain)) ||
-            !(await downloadAndInstallTools(selectedSDK)) ||
-            !(await downloadAndInstallPicotool(picotoolVersion))
-          ) {
-            this._logger.error(
-              `Failed to download and install toolchain and SDK.`
-            );
+          const result = await downloadAndInstallSDK(
+            selectedSDK,
+            SDK_REPOSITORY_URL,
+            // python3Path is only possible undefined if downloaded and there is already checked and returned if this happened
+            python3Path.replace(HOME_VAR, homedir().replaceAll("\\", "/"))
+          );
 
+          if (!result) {
+            this._logger.error(`Failed to download and install SDK.`);
+            installedSuccessfully = false;
             progress2.report({
               message: "Failed - Make sure all requirements are met.",
               increment: 100,
             });
 
-            installedSuccessfully = false;
-          } else {
-            installedSuccessfully = true;
-            if (!(await downloadAndInstallOpenOCD(openOCDVersion))) {
-              this._logger.error(`Failed to download and install openocd.`);
-            } else {
-              this._logger.info(
-                `Successfully downloaded and installed openocd.`
-              );
-            }
+            void window.showErrorMessage(
+              "Failed to download and install SDK. Make sure all requirements are met."
+            );
+
+            return;
           }
         }
       );
@@ -882,12 +851,177 @@ export class NewProjectPanel {
           message: "Failed",
           increment: 100,
         });
-        await window.showErrorMessage(
-          "Failed to download and install SDK and/or toolchain."
-        );
 
         return;
       }
+
+      let prog2LastState = 0;
+      await window.withProgress(
+        {
+          location: ProgressLocation.Notification,
+          title: "Downloading and installing toolchain",
+          cancellable: false,
+        },
+        async progress2 => {
+          const result = await downloadAndInstallToolchain(
+            selectedToolchain,
+            (prog: GotProgress) => {
+              const per = prog.percent * 100;
+              progress2.report({
+                increment: per - prog2LastState,
+              });
+              prog2LastState = per;
+            }
+          );
+
+          if (!result) {
+            this._logger.error(`Failed to download and install toolchain.`);
+            installedSuccessfully = false;
+            progress2.report({
+              message: "Failed",
+              increment: 100,
+            });
+
+            void window.showErrorMessage(
+              "Failed to download and install toolchain."
+            );
+
+            return;
+          }
+        }
+      );
+
+      if (!installedSuccessfully) {
+        progress.report({
+          message: "Failed",
+          increment: 100,
+        });
+
+        return;
+      }
+
+      prog2LastState = 0;
+      await window.withProgress(
+        {
+          location: ProgressLocation.Notification,
+          title: "Downloading and installing tools",
+          cancellable: false,
+        },
+        async progress2 => {
+          const result = await downloadAndInstallTools(
+            selectedSDK,
+            (prog: GotProgress) => {
+              const per = prog.percent * 100;
+              progress2.report({
+                increment: per - prog2LastState,
+              });
+              prog2LastState = per;
+            }
+          );
+
+          if (!result) {
+            this._logger.error(`Failed to download and install tools.`);
+            installedSuccessfully = false;
+            progress2.report({
+              message: "Failed",
+              increment: 100,
+            });
+
+            void window.showErrorMessage(
+              "Failed to download and install tools."
+            );
+
+            return;
+          }
+        }
+      );
+
+      if (!installedSuccessfully) {
+        progress.report({
+          message: "Failed",
+          increment: 100,
+        });
+
+        return;
+      }
+
+      prog2LastState = 0;
+      await window.withProgress(
+        {
+          location: ProgressLocation.Notification,
+          title: "Downloading and installing picotool",
+          cancellable: false,
+        },
+        async progress2 => {
+          const result = await downloadAndInstallPicotool(
+            selectedPicotool,
+            (prog: GotProgress) => {
+              const per = prog.percent * 100;
+              progress2.report({
+                increment: per - prog2LastState,
+              });
+              prog2LastState = per;
+            }
+          );
+
+          if (!result) {
+            this._logger.error(`Failed to download and install picotool.`);
+            installedSuccessfully = false;
+            progress2.report({
+              message: "Failed",
+              increment: 100,
+            });
+
+            void window.showErrorMessage(
+              "Failed to download and install picotool."
+            );
+
+            return;
+          }
+        }
+      );
+
+      if (!installedSuccessfully) {
+        progress.report({
+          message: "Failed",
+          increment: 100,
+        });
+
+        return;
+      }
+
+      prog2LastState = 0;
+      await window.withProgress(
+        {
+          location: ProgressLocation.Notification,
+          title: "Downloading and installing OpenOCD",
+          cancellable: false,
+        },
+        async progress2 => {
+          const result = await downloadAndInstallOpenOCD(
+            openOCDVersion,
+            (prog: GotProgress) => {
+              const per = prog.percent * 100;
+              progress2.report({
+                increment: per - prog2LastState,
+              });
+              prog2LastState = per;
+            }
+          );
+
+          if (!result) {
+            this._logger.error(`Failed to download and install OpenOCD.`);
+            // not required
+            //installedSuccessfully = false;
+            progress2.report({
+              message: "Failed",
+              increment: 100,
+            });
+
+            return;
+          }
+        }
+      );
 
       let ninjaExecutable: string;
       let cmakeExecutable: string;
@@ -902,7 +1036,7 @@ export class NewProjectPanel {
               increment: 100,
             });
             await window.showErrorMessage(
-              "Failed to get ninja version for the selected Pico-SDK version."
+              "Failed to get ninja version for the selected Pico SDK version."
             );
 
             return;
@@ -910,16 +1044,28 @@ export class NewProjectPanel {
         // eslint-disable-next-line no-fallthrough
         case 2:
           installedSuccessfully = false;
+          prog2LastState = 0;
           await window.withProgress(
             {
               location: ProgressLocation.Notification,
-              title: "Download and install ninja",
+              title: "Download and install Ninja",
               cancellable: false,
             },
             async progress2 => {
-              if (await downloadAndInstallNinja(data.ninjaVersion)) {
+              if (
+                await downloadAndInstallNinja(
+                  data.ninjaVersion,
+                  (prog: GotProgress) => {
+                    const per = prog.percent * 100;
+                    progress2.report({
+                      increment: per - prog2LastState,
+                    });
+                    prog2LastState = per;
+                  }
+                )
+              ) {
                 progress2.report({
-                  message: "Successfully downloaded and installed ninja.",
+                  message: "Successfully downloaded and installed Ninja.",
                   increment: 100,
                 });
 
@@ -939,7 +1085,7 @@ export class NewProjectPanel {
               message: "Failed",
               increment: 100,
             });
-            await window.showErrorMessage(
+            void window.showErrorMessage(
               "Failed to download and install ninja. Make sure all requirements are met."
             );
 
@@ -968,7 +1114,7 @@ export class NewProjectPanel {
             message: "Failed",
             increment: 100,
           });
-          await window.showErrorMessage("Unknown ninja selection.");
+          void window.showErrorMessage("Unknown ninja selection.");
           this._logger.error("Unknown ninja selection.");
 
           return;
@@ -982,16 +1128,29 @@ export class NewProjectPanel {
         // eslint-disable-next-line no-fallthrough
         case 2:
           installedSuccessfully = false;
+          prog2LastState = 0;
           await window.withProgress(
             {
               location: ProgressLocation.Notification,
-              title: "Download and install cmake",
+              title: "Download and install CMake",
               cancellable: false,
             },
             async progress2 => {
-              if (await downloadAndInstallCmake(data.cmakeVersion)) {
+              if (
+                await downloadAndInstallCmake(
+                  data.cmakeVersion,
+                  (prog: GotProgress) => {
+                    const per = prog.percent * 100;
+                    progress2.report({
+                      increment: per - prog2LastState,
+                    });
+                    prog2LastState = per;
+                  }
+                )
+              ) {
                 progress.report({
-                  message: "Successfully downloaded and installed cmake.",
+                  // TODO: maybe just finished or something like that
+                  message: "Successfully downloaded and installed CMake.",
                   increment: 100,
                 });
 
@@ -1011,8 +1170,9 @@ export class NewProjectPanel {
               message: "Failed",
               increment: 100,
             });
-            await window.showErrorMessage(
-              "Failed to download and install cmake. Make sure all requirements are met."
+            void window.showErrorMessage(
+              // TODO: maybe remove all requirements met part
+              "Failed to download and install CMake. Make sure all requirements are met."
             );
 
             return;
@@ -1039,14 +1199,19 @@ export class NewProjectPanel {
             message: "Failed",
             increment: 100,
           });
-          await window.showErrorMessage("Unknown cmake selection.");
+          void window.showErrorMessage("Unknown cmake selection.");
           this._logger.error("Unknown cmake selection.");
 
           return;
       }
 
-      if (!exampleBased && !this._isProjectImport) {
+      if (example === undefined && !this._isProjectImport) {
         const theData = data as SubmitMessageValue;
+
+        await this._settings.setEntryPointNamingPref(
+          theData.entryPointProjectName
+        );
+
         const args: NewProjectOptions = {
           name: theData.projectName,
           projectRoot: projectPath,
@@ -1054,7 +1219,7 @@ export class NewProjectPanel {
           consoleOptions: [
             theData.uartStdioSupport ? ConsoleOption.consoleOverUART : null,
             theData.usbStdioSupport ? ConsoleOption.consoleOverUSB : null,
-          ].filter(option => option !== null) as ConsoleOption[],
+          ].filter(option => option !== null),
           libraries: [
             theData.spiFeature ? Library.spi : null,
             theData.i2cFeature ? Library.i2c : null,
@@ -1064,38 +1229,43 @@ export class NewProjectPanel {
             theData.hwtimerFeature ? Library.timer : null,
             theData.hwwatchdogFeature ? Library.watch : null,
             theData.hwclocksFeature ? Library.clocks : null,
-            theData.boardType === "pico-w"
+            theData.boardType === "pico_w"
               ? Object.values(PicoWirelessOption)[theData.picoWireless]
               : null,
           ].filter(option => option !== null) as Library[],
           codeOptions: [
-            theData.addExamples ? CodeOption.addExamples : null,
+            theData.addUartExample ? CodeOption.addUartExample : null,
             theData.runFromRAM ? CodeOption.runFromRAM : null,
+            theData.entryPointProjectName
+              ? CodeOption.entryPointProjectName
+              : null,
             theData.cpp ? CodeOption.cpp : null,
             theData.cppRtti ? CodeOption.cppRtti : null,
             theData.cppExceptions ? CodeOption.cppExceptions : null,
-          ].filter(option => option !== null) as CodeOption[],
+          ].filter(option => option !== null),
           debugger: data.debugger === 1 ? Debugger.swd : Debugger.debugProbe,
           toolchainAndSDK: {
             toolchainVersion: selectedToolchain.version,
             toolchainPath: buildToolchainPath(selectedToolchain.version),
             sdkVersion: selectedSDK,
             sdkPath: buildSDKPath(selectedSDK),
-            picotoolVersion: picotoolVersion,
+            picotoolVersion: selectedPicotool,
             openOCDVersion: openOCDVersion,
           },
           ninjaExecutable,
           cmakeExecutable,
+          useCmakeTools: data.useCmakeTools,
         };
 
         await this._executePicoProjectGenerator(
           args,
           python3Path.replace(HOME_VAR, homedir().replaceAll("\\", "/"))
         );
-      } else if (exampleBased && !this._isProjectImport) {
+      } else if (example !== undefined && !this._isProjectImport) {
         const theData = data as SubmitExampleMessageValue;
         const args: NewExampleBasedProjectOptions = {
           name: theData.example,
+          libNames: example.libNames,
           projectRoot: projectPath,
           boardType: theData.boardType as BoardType,
           debugger: data.debugger === 1 ? Debugger.swd : Debugger.debugProbe,
@@ -1104,11 +1274,12 @@ export class NewProjectPanel {
             toolchainPath: buildToolchainPath(selectedToolchain.version),
             sdkVersion: selectedSDK,
             sdkPath: buildSDKPath(selectedSDK),
-            picotoolVersion: picotoolVersion,
+            picotoolVersion: selectedPicotool,
             openOCDVersion: openOCDVersion,
           },
           ninjaExecutable,
           cmakeExecutable,
+          useCmakeTools: data.useCmakeTools,
         };
 
         await this._executePicoProjectGenerator(
@@ -1116,7 +1287,7 @@ export class NewProjectPanel {
           python3Path.replace(HOME_VAR, homedir().replaceAll("\\", "/")),
           true
         );
-      } else if (this._isProjectImport && !exampleBased) {
+      } else if (this._isProjectImport && example === undefined) {
         const args: ImportProjectOptions = {
           projectRoot: projectPath,
           toolchainAndSDK: {
@@ -1124,12 +1295,13 @@ export class NewProjectPanel {
             toolchainPath: buildToolchainPath(selectedToolchain.version),
             sdkVersion: selectedSDK,
             sdkPath: buildSDKPath(selectedSDK),
-            picotoolVersion: picotoolVersion,
+            picotoolVersion: selectedPicotool,
             openOCDVersion: openOCDVersion,
           },
           ninjaExecutable,
           cmakeExecutable,
           debugger: data.debugger === 1 ? Debugger.swd : Debugger.debugProbe,
+          useCmakeTools: data.useCmakeTools,
         };
 
         await this._executePicoProjectGenerator(
@@ -1165,25 +1337,45 @@ export class NewProjectPanel {
     );
 
     if (html !== "") {
-      this._panel.webview.html = html;
+      try {
+        this._panel.webview.html = html;
+      } catch (error) {
+        this._logger.error(
+          "Failed to set webview html. Webview might have been disposed. Error: ",
+          unknownErrorToString(error)
+        );
+        // properly dispose panel
+        this.dispose();
+
+        return;
+      }
       await this._updateTheme();
     } else {
       void window.showErrorMessage(
-        "Failed to load available Pico-SDKs and/or supported toolchains. This may be due to an outdated personal access token for GitHub."
+        "Failed to load available Pico SDKs and/or supported toolchains. This may be due to an outdated personal access token for GitHub or a exceeded rate limit."
       );
       this.dispose();
     }
   }
 
   private async _updateTheme(): Promise<void> {
-    await this._panel.webview.postMessage({
-      command: "setTheme",
-      theme:
-        window.activeColorTheme.kind === ColorThemeKind.Dark ||
-        window.activeColorTheme.kind === ColorThemeKind.HighContrast
-          ? "dark"
-          : "light",
-    });
+    try {
+      await this._panel.webview.postMessage({
+        command: "setTheme",
+        theme:
+          window.activeColorTheme.kind === ColorThemeKind.Dark ||
+          window.activeColorTheme.kind === ColorThemeKind.HighContrast
+            ? "dark"
+            : "light",
+      });
+    } catch (error) {
+      this._logger.error(
+        "Failed to update theme in webview. Webview might have been disposed. Error:",
+        unknownErrorToString(error)
+      );
+      // properly dispose panel
+      this.dispose();
+    }
   }
 
   public dispose(): void {
@@ -1231,12 +1423,46 @@ export class NewProjectPanel {
       Uri.joinPath(this._extensionUri, "web", "raspberrypi-nav-header-dark.svg")
     );
 
+    const riscvWhiteSvgUri = webview.asWebviewUri(
+      Uri.joinPath(
+        this._extensionUri,
+        "web",
+        "riscv",
+        "RISC-V_Horizontal_White.svg"
+      )
+    );
+    const riscvWhiteYellowSvgUri = webview.asWebviewUri(
+      Uri.joinPath(
+        this._extensionUri,
+        "web",
+        "riscv",
+        "RISC-V_Horizontal_White_Yellow.svg"
+      )
+    );
+    const riscvBlackSvgUri = webview.asWebviewUri(
+      Uri.joinPath(
+        this._extensionUri,
+        "web",
+        "riscv",
+        "RISC-V_Horizontal_Black.svg"
+      )
+    );
+    const riscvColorSvgUri = webview.asWebviewUri(
+      Uri.joinPath(
+        this._extensionUri,
+        "web",
+        "riscv",
+        "RISC-V_Horizontal_Color.svg"
+      )
+    );
+
     this._versionBundlesLoader = new VersionBundlesLoader(this._extensionUri);
 
     // construct auxiliar html
     // TODO: add offline handling - only load installed ones
     let toolchainsHtml = "";
     let picoSDKsHtml = "";
+    let picotoolsHtml = "";
     let ninjasHtml = "";
     let cmakesHtml = "";
 
@@ -1251,6 +1477,7 @@ export class NewProjectPanel {
       const supportedToolchains = await getSupportedToolchains();
       const ninjaReleases = await getNinjaReleases();
       const cmakeReleases = await getCmakeReleases();
+      const picotoolReleases = await getPicotoolReleases();
 
       if (availableSDKs.length === 0 || supportedToolchains.length === 0) {
         this._logger.error(
@@ -1274,6 +1501,14 @@ export class NewProjectPanel {
               ? `class="advanced-option-2" disabled`
               : ""
           }>v${sdk}</option>`;
+        });
+
+      picotoolReleases
+        .sort((a, b) => compare(b, a))
+        .forEach(picotool => {
+          picotoolsHtml += `<option ${
+            picotoolsHtml.length === 0 ? "selected " : ""
+          }value="${picotool}">${picotool}</option>`;
         });
 
       supportedToolchains.forEach(toolchain => {
@@ -1332,10 +1567,6 @@ export class NewProjectPanel {
       (await which("ninja", { nothrow: true })) !== null;
     const isCmakeSystemAvailable =
       (await which("cmake", { nothrow: true })) !== null;
-    // TODO: check python version, workaround, ownly allow python3 commands on unix
-    const isPythonSystemAvailable =
-      (await which("python3", { nothrow: true })) !== null ||
-      (await which("python", { nothrow: true })) !== null;
 
     if (!isNinjaSystemAvailable && NINJA_AUTO_INSTALL_DISABLED) {
       this.dispose();
@@ -1351,6 +1582,9 @@ export class NewProjectPanel {
 
     // Restrict the webview to only load specific scripts
     const nonce = getNonce();
+    const isWindows = process.platform === "win32";
+    const useProjectNameAsEntryPointFileName =
+      this._settings.getEntryPointNamingPref();
 
     return `<!DOCTYPE html>
     <html lang="en">
@@ -1382,15 +1616,24 @@ export class NewProjectPanel {
           ${
             !this._isProjectImport && this._examples.length > 0
               ? `
-          var examples = ["${this._examples
-            .map(e => e.searchKey)
-            .join('", "')}"]`
+          var examples = {${this._examples
+            .map(
+              e =>
+                `"${e.searchKey}": {"boards": [${e.boards
+                  .map(b => `"${b}"`)
+                  .join(", ")}], "supportRiscV": ${e.supportRiscV}}`
+            )
+            .join(", ")}};`
               : ""
           }
           var doProjectImport = ${this._isProjectImport};
-          const forceCreateFromExample = ${
-            forceCreateFromExample ? "true" : "false"
-          };
+          var forceCreateFromExample = ${forceCreateFromExample};
+
+          // riscv logos
+          const riscvWhiteSvgUri = "${riscvWhiteSvgUri.toString()}";
+          const riscvWhiteYellowSvgUri = "${riscvWhiteYellowSvgUri.toString()}";
+          const riscvBlackSvgUri = "${riscvBlackSvgUri.toString()}";
+          const riscvColorSvgUri = "${riscvColorSvgUri.toString()}";
         </script>
       </head>
       <body class="scroll-smooth w-screen">
@@ -1453,7 +1696,6 @@ export class NewProjectPanel {
         <main class="container max-w-3xl xl:max-w-5xl mx-auto relative top-14 snap-y mb-20">
             <div id="section-basic" class="snap-start">
                 <h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Basic Settings</h3>
-                <form>
                   ${
                     !this._isProjectImport
                       ? `<div id="project-name-grid" class="grid gap-6 ${
@@ -1468,55 +1710,57 @@ export class NewProjectPanel {
                                   forceCreateFromExample
                                     ? "Select an example"
                                     : "Project name"
-                                }" required/>
-                                <button id="project-name-dropdown-button" class="absolute inset-y-0 right-0 flex items-center px-2 border border-l-0 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white rounded-r-lg border-gray-300 dark:border-gray-600 ${
+                                }" required/> <!-- without this required the webview will crash every time you hit the examples button -->
+                                <button id="project-name-dropdown-button" class="absolute inset-y-0 right-0 flex items-center px-2 border bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white rounded-r-lg border-gray-300 dark:border-gray-600 ${
                                   !forceCreateFromExample ? "hidden" : ""
                                 }">&#9660;</button>
+                                ${
+                                  this._examples.length > 0
+                                    ? `   
+                                    <ul id="examples-list" class="bg-gray-50 border-gray-300 dark:bg-gray-700 dark:border-gray-600 rounded-b-lg"></ul>                          
+                                <!--<datalist id="examples-list">
+                                  <option value="\${this._examples
+                                    .map(e => e.searchKey)
+                                    .join(
+                                      '">example project</option>\n<option value="'
+                                    )}">example project</option>
+                                </datalist>-->`
+                                    : ""
+                                }
                             </div>
-                            <button id="btn-create-from-example" class="focus:outline-none bg-transparent ring-2 focus:ring-3 ring-blue-400 dark:ring-blue-700 font-medium rounded-lg px-4 ml-2 hover:bg-blue-500 dark:hover:bg-blue-700 focus:ring-blue-600 dark:focus:ring-blue-800" tooltip="Create from example">Example</button>
+                            <button id="btn-create-from-example" class="focus:outline-none bg-transparent ring-2 focus:ring-3 ring-blue-400 dark:ring-blue-700 font-medium rounded-lg px-4 ml-4 hover:bg-blue-500 dark:hover:bg-blue-700 focus:ring-blue-600 dark:focus:ring-blue-800" tooltip="Create from example">Example</button>
                           </div>
-                              
-                          ${
-                            this._examples.length > 0
-                              ? `   
-                              <ul id="examples-list"></ul>                          
-                          <!--<datalist id="examples-list">
-                            <option value="\${this._examples
-                              .map(e => e.searchKey)
-                              .join(
-                                '">example project</option>\n<option value="'
-                              )}">example project</option>
-                          </datalist>-->`
-                              : ""
-                          }
 
                           <p id="inp-project-name-error" class="mt-2 text-sm text-red-600 dark:text-red-500" hidden>
                               <span class="font-medium">Error</span> Please enter a valid project name.
                           </p>
                         </div>
                 
-                        <div>
+                        <div id="board-type-riscv-grid" class="grid gap-6 grid-cols-2">
+                          <div>
                             <label for="sel-board-type" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Board type</label>
                             <select id="sel-board-type" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
-                                ${
-                                  // show the default option only if a use has the option to create base on an example
-                                  this._examples.length > 0
-                                    ? `<option id="sel-${BoardType.default}" value="${BoardType.default}">Default</option>`
-                                    : ""
-                                }
-                                <option id="sel-${BoardType.pico}" value="${
-                          BoardType.pico
-                        }">Pico</option>
-                                <option id="sel-${BoardType.picoW}" value="${
-                          BoardType.picoW
-                        }">Pico W</option>
-                                <option id="sel-${BoardType.pico2}" value="${
-                          BoardType.pico2
-                        }" selected>Pico 2</option>
-                                <option id="sel-${BoardType.other}" value="${
-                          BoardType.other
-                        }">Other</option>
+                             <option id="option-board-type-${
+                               BoardType.pico2
+                             }" value="${BoardType.pico2}">Pico 2</option>    
+                              <option id="option-board-type-${
+                                BoardType.pico
+                              }" value="${BoardType.pico}">Pico</option>
+                              <option id="option-board-type-${
+                                BoardType.picoW
+                              }" value="${BoardType.picoW}">Pico W</option>
+                              <option id="option-board-type-${
+                                BoardType.other
+                              }" value="${BoardType.other}">Other</option>
                             </select>
+                          </div>
+                          <div class="use-riscv text-sm font-medium text-gray-900 dark:text-white" hidden>
+                            <label for="riscvToggle" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Architecture (Pico 2)</label>
+                            <div class="flex items-center justify-between p-2 bg-gray-100 rounded-lg dark:bg-gray-700">
+                              <input type="checkbox" id="sel-riscv" class="ms-2" />
+                              <img id="riscvIcon" src="${riscvColorSvgUri.toString()}" alt="RISC-V Logo" class="h-6 mx-auto w-28">
+                            </div>
+                          </div>
                         </div>
                       </div>`
                       : `<h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">
@@ -1567,11 +1811,18 @@ export class NewProjectPanel {
                                 </span>
                                 <input type="text" id="inp-project-location" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-r-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-gray-500 dark:focus:ring-blue-500 dark:focus:border-blue-500" placeholder="${
                                   !this._isProjectImport
-                                    ? "C:\\MyProject"
-                                    : "C:\\Project\\To\\Import"
+                                    ? isWindows
+                                      ? "C:\\MyProject"
+                                      : "/home/user/myproject"
+                                    : isWindows
+                                    ? "C:\\Project\\To\\Import"
+                                    : "/project/to/import"
                                 }" disabled value="${
+      // support folder names with backslashes on linux and macOS
       this._projectRoot !== undefined
-        ? this._projectRoot.fsPath.replaceAll("\\", "/")
+        ? process.platform === "win32"
+          ? this._projectRoot.fsPath.replaceAll("\\", "/")
+          : this._projectRoot.fsPath
         : ""
     }"/>
                             </div>
@@ -1586,20 +1837,23 @@ export class NewProjectPanel {
                         </div>
                     </div>
                     <div class="grid gap-6 md:grid-cols-2 mt-6">
-                      <div>
-                        <label for="sel-pico-sdk" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select Pico-SDK version</label>
+                      <div id="pico-sdk-selector">
+                        <label for="sel-pico-sdk" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select Pico SDK version</label>
                         <select id="sel-pico-sdk" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
                             ${picoSDKsHtml}
                         </select>
                       </div>
-                      <div class="use-riscv text-sm font-medium text-gray-900 dark:text-white" hidden>
-                        <label for="sel-riscv">Use RISC-V</label>
-                        <input type="checkbox" id="sel-riscv">
-                      </div>
+                      
                       <div class="advanced-option" hidden>
                         <label for="sel-toolchain" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select ARM/RISCV Embeded Toolchain version</label>
                         <select id="sel-toolchain" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
                             ${toolchainsHtml}
+                        </select>
+                      </div>
+                      <div hidden>
+                        <label for="sel-picotool" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select picotool version</label>
+                        <select id="sel-picotool" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500">
+                            ${picotoolsHtml}
                         </select>
                       </div>
                     </div>
@@ -1685,42 +1939,7 @@ export class NewProjectPanel {
                           <input type="file" id="cmake-path-executable" multiple="false" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 ms-2">
                         </div>
                       </div>
-
-                      ${
-                        process.platform === "darwin" ||
-                        process.platform === "win32"
-                          ? `
-                          <div class="col-span-2">
-                            <label class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Python Version:</label>
-
-                            ${
-                              this._versionBundle !== undefined
-                                ? `<div class="flex items-center mb-2">
-                                    <input type="radio" id="python-radio-default-version" name="python-version-radio" value="0" class="mr-1 text-blue-500 requires-version-bundle">
-                                    <label for="python-radio-default-version" class="text-gray-900 dark:text-white">Default version</label>
-                                  </div>`
-                                : ""
-                            }
-
-                            ${
-                              isPythonSystemAvailable
-                                ? `<div class="flex items-center mb-2" >
-                                    <input type="radio" id="python-radio-system-version" name="python-version-radio" value="1" class="mr-1 text-blue-500">
-                                    <label for="python-radio-system-version" class="text-gray-900 dark:text-white">Use system version</label>
-                                  </div>`
-                                : ""
-                            }
-
-                            <div class="flex items-center mb-2">
-                              <input type="radio" id="python-radio-path-executable" name="python-version-radio" value="2" class="mr-1 text-blue-500">
-                              <label for="python-radio-path-executable" class="text-gray-900 dark:text-white">Path to executable:</label>
-                              <input type="file" id="python-path-executable" multiple="false" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 ms-2">
-                            </div>
-                          </div>`
-                          : ""
-                      }
                     </div>
-                </form>
             </div>
             ${
               !this._isProjectImport
@@ -1735,34 +1954,28 @@ export class NewProjectPanel {
                     </li>
                     <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
                         <div class="flex items-center pl-3">
-                            <input id="pio-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
-                            <label for="pio-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">PIO interface</label>
-                        </div>
-                    </li>
-                    <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
-                        <div class="flex items-center pl-3">
                             <input id="i2c-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
                             <label for="i2c-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">I2C interface</label>
                         </div>
                     </li>
                     <li class="w-full dark:border-gray-600">
                         <div class="flex items-center pl-3">
-                            <input id="dma-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
-                            <label for="dma-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">DMA support</label>
+                            <input id="uart-example-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
+                            <label for="uart-example-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">UART</label>
                         </div>
                     </li>
                 </ul>
-                <ul class="items-center w-full text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg sm:flex dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                    <li class="w-full dark:border-gray-600">
+                <ul class="mb-2 items-center w-full text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg sm:flex dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                    <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
                         <div class="flex items-center pl-3">
-                            <input id="hwwatchdog-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
-                            <label for="hwwatchdog-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">HW watchdog</label>
+                            <input id="pio-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
+                            <label for="pio-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">PIO interface</label>
                         </div>
                     </li>
-                    <li class="w-full dark:border-gray-600">
+                    <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
                         <div class="flex items-center pl-3">
-                            <input id="hwclocks-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
-                            <label for="hwclocks-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">HW clocks</label>
+                            <input id="dma-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
+                            <label for="dma-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">DMA support</label>
                         </div>
                     </li>
                     <li class="w-full dark:border-gray-600">
@@ -1771,10 +1984,24 @@ export class NewProjectPanel {
                             <label for="hwinterpolation-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">HW interpolation</label>
                         </div>
                     </li>
-                    <li class="w-full dark:border-gray-600">
+                </ul>
+                <ul class="items-center w-full text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg sm:flex dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+                    <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
+                        <div class="flex items-center pl-3">
+                            <input id="hwwatchdog-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
+                            <label for="hwwatchdog-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">HW watchdog</label>
+                        </div>
+                    </li>
+                    <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
                         <div class="flex items-center pl-3">
                             <input id="hwtimer-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
                             <label for="hwtimer-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">HW timer</label>
+                        </div>
+                    </li>
+                    <li class="w-full dark:border-gray-600">
+                        <div class="flex items-center pl-3">
+                            <input id="hwclocks-features-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
+                            <label for="hwclocks-features-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">HW clocks</label>
                         </div>
                     </li>
                 </ul>
@@ -1827,14 +2054,18 @@ export class NewProjectPanel {
                 <ul class="mb-2 items-center w-full text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg sm:flex dark:bg-gray-700 dark:border-gray-600 dark:text-white">
                     <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
                         <div class="flex items-center pl-3">
-                            <input id="add-examples-code-gen-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
-                            <label for="add-examples-code-gen-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">Add examples from Pico library</label>
+                            <input id="run-from-ram-code-gen-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
+                            <label for="run-from-ram-code-gen-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">Run the program from RAM rather than flash</label>
                         </div>
                     </li>
                     <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
                         <div class="flex items-center pl-3">
-                            <input id="run-from-ram-code-gen-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
-                            <label for="run-from-ram-code-gen-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">Run the program from RAM rather than flash</label>
+                            <input id="entry-project-name-code-gen-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500" ${
+                              useProjectNameAsEntryPointFileName
+                                ? "checked"
+                                : ""
+                            }>
+                            <label for="entry-project-name-code-gen-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">Use project name as entry point file name</label>
                         </div>
                     </li>
                 </ul>
@@ -1845,7 +2076,7 @@ export class NewProjectPanel {
                       <label for="cpp-code-gen-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">Generate C++ code</label>
                     </div>
                   </li>
-                  <li class="w-full dark:border-gray-600">
+                  <li class="w-full border-b border-gray-200 sm:border-b-0 sm:border-r dark:border-gray-600">
                     <div class="flex items-center pl-3">
                       <input id="cpp-rtti-code-gen-cblist" type="checkbox" value="" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500">
                       <label for="cpp-rtti-code-gen-cblist" class="w-full py-3 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">Enable C++ RTTI (Uses more memory)</label>
@@ -1861,17 +2092,29 @@ export class NewProjectPanel {
             </div>`
                 : ""
             }
-            <div id="section-debugger" class="snap-start mt-10">
-                <h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-8">Debugger</h3>
-                <div class="flex items-stretch space-x-4">
-                    <div class="flex items-center px-4 py-2 border border-gray-200 rounded dark:border-gray-700">
-                        <input checked id="debugger-radio-debug-probe" type="radio" value="0" name="debugger-radio" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 outline-none focus:ring-0 focus:ring-offset-5 dark:bg-gray-700 dark:border-gray-600">
-                        <label for="debugger-radio-debug-probe" class="w-full py-4 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">DebugProbe (CMSIS-DAP) [Default]</label>
+            
+            <div class="grid gap-6 grid-cols-3 mt-10">
+                <div id="section-debugger" class="snap-start col-span-2">
+                    <h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-8">Debugger</h3>
+                    <div class="flex items-stretch space-x-4">
+                        <div class="flex items-center px-4 py-2 border border-gray-200 rounded dark:border-gray-700">
+                            <input checked id="debugger-radio-debug-probe" type="radio" value="0" name="debugger-radio" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 outline-none focus:ring-0 focus:ring-offset-5 dark:bg-gray-700 dark:border-gray-600">
+                            <label for="debugger-radio-debug-probe" class="w-full py-4 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">DebugProbe (CMSIS-DAP) [Default]</label>
+                        </div>
+                        <div class="flex items-center px-4 py-2 border border-gray-200 rounded dark:border-gray-700">
+                            <input id="debugger-radio-swd" type="radio" value="1" name="debugger-radio" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 outline-none focus:ring-0 focus:ring-offset-5 dark:bg-gray-700 dark:border-gray-600">
+                            <label for="debugger-radio-swd" class="w-full py-4 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">SWD (Pi host, on Pi 5 it requires Linux Kernel >= 6.6.47)</label>
+                        </div>
                     </div>
-                    <div class="flex items-center px-4 py-2 border border-gray-200 rounded dark:border-gray-700">
-                        <input id="debugger-radio-swd" type="radio" value="1" name="debugger-radio" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 outline-none focus:ring-0 focus:ring-offset-5 dark:bg-gray-700 dark:border-gray-600">
-                        <label for="debugger-radio-swd" class="w-full py-4 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">SWD (Pi host)</label>
-                    </div>
+                </div>
+                <div id="section-extension-integration" class="snap-end advanced-option" hidden>
+                  <h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-8">CMake Tools</h3>
+                  <div class="flex items-stretch space-x-4">
+                      <div class="flex items-center px-4 py-2 border border-gray-200 rounded dark:border-gray-700">
+                          <input id="use-cmake-tools-cb" type="checkbox" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 outline-none focus:ring-0 focus:ring-offset-5 dark:bg-gray-700 dark:border-gray-600">
+                          <label for="use-cmake-tools-cb" class="w-full py-4 ml-2 text-sm font-medium text-gray-900 dark:text-gray-300">Enable CMake-Tools extension integration</label>
+                      </div>
+                  </div>
                 </div>
             </div>
             <div class="bottom-3 mt-8 mb-12 w-full flex justify-end">
@@ -1960,12 +2203,10 @@ export class NewProjectPanel {
     if ("boardType" in options) {
       try {
         boardTypeFromEnum = await enumToBoard(
-          options.boardType === BoardType.default
-            ? BoardType.pico
-            : options.boardType,
+          options.boardType,
           options.toolchainAndSDK.sdkPath
         );
-      } catch (error) {
+      } catch {
         await window.showErrorMessage(
           "Unknown board type: " + options.boardType
         );
@@ -1983,7 +2224,7 @@ export class NewProjectPanel {
               ? "-nouart"
               : "",
           ]
-        : "boardType" in options && options.boardType !== BoardType.default
+        : "boardType" in options
         ? [boardTypeFromEnum]
         : [];
     if (!("boardType" in options) && this._isProjectImport) {
@@ -2005,11 +2246,14 @@ export class NewProjectPanel {
       } catch {
         /* ignore */
       }
-    } else if ("boardType" in options && isExampleBased && "name" in options) {
-      if (options.boardType === BoardType.default) {
-        if (options.name.includes("picow") || options.name.includes("pico_w")) {
-          basicNewProjectOptions.push(`-board pico_w`);
-        }
+    } else if (
+      "boardType" in options &&
+      isExampleBased &&
+      "name" in options &&
+      "libNames" in options
+    ) {
+      for (const libName of options.libNames) {
+        basicNewProjectOptions.push(`-examLibs ${libName}`);
       }
     }
 
@@ -2033,6 +2277,7 @@ export class NewProjectPanel {
           );
 
     const command: string = [
+      // TODO: maybe use includes powershell instead of .exe and ===
       `${process.env.ComSpec === "powershell.exe" ? "&" : ""}"${pythonExe}"`,
       `"${joinPosix(getScriptsRoot(), "pico_project.py")}"`,
       ...basicNewProjectOptions,
@@ -2049,7 +2294,9 @@ export class NewProjectPanel {
               0,
               options.projectRoot.lastIndexOf("/")
             )
-          : options.projectRoot
+          : isWindows
+          ? options.projectRoot
+          : options.projectRoot.replaceAll("\\", "\\\\")
       }"`,
       "--sdkVersion",
       options.toolchainAndSDK.sdkVersion,
@@ -2063,9 +2310,8 @@ export class NewProjectPanel {
       `"${options.ninjaExecutable}"`,
       "--cmakePath",
       `"${options.cmakeExecutable}"`,
+      options.useCmakeTools ? "-ucmt" : "",
 
-      // set custom python executable path used flag if python executable is not in PATH
-      pythonExe.includes("/") ? "-cupy" : "",
       `"${projectName}"`,
     ].join(" ");
 
@@ -2078,7 +2324,6 @@ export class NewProjectPanel {
       env: customEnv,
       cwd: getScriptsRoot(),
       windowsHide: true,
-      timeout: 15000,
     });
     if (
       (process.platform === "linux" && generatorExitCode === null) ||
@@ -2100,7 +2345,9 @@ export class NewProjectPanel {
             ? options.projectRoot
             : join(options.projectRoot, projectName)
         ),
-        (workspace.workspaceFolders?.length ?? 0) > 0
+        {
+          forceNewWindow: (workspace.workspaceFolders?.length ?? 0) > 0,
+        }
       );
 
       // restart the extension if the folder was already open cause then vscode won't

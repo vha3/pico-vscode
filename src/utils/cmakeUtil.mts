@@ -5,29 +5,34 @@ import { dirname, join, resolve } from "path";
 import Settings from "../settings.mjs";
 import { HOME_VAR, SettingsKey } from "../settings.mjs";
 import { existsSync, readFileSync, rmSync } from "fs";
-import Logger from "../logger.mjs";
+import Logger, { LoggerSource } from "../logger.mjs";
 import { readFile, writeFile } from "fs/promises";
 import { rimraf, windows as rimrafWindows } from "rimraf";
 import { homedir } from "os";
 import which from "which";
 import { compareLtMajor } from "./semverUtil.mjs";
+import { buildCMakeIncPath } from "./download.mjs";
+
+export const CMAKE_DO_NOT_EDIT_HEADER_PREFIX =
+  // eslint-disable-next-line max-len
+  "== DO NEVER EDIT THE NEXT LINES for Raspberry Pi Pico VS Code Extension to work ==";
 
 export async function getPythonPath(): Promise<string> {
   const settings = Settings.getInstance();
   if (settings === undefined) {
-    Logger.log("Error: Settings not initialized.");
+    Logger.error(LoggerSource.cmake, "Settings not initialized.");
 
     return "";
   }
 
   const pythonPath = (
-    await which(
+    (await which(
       settings
         .getString(SettingsKey.python3Path)
         ?.replace(HOME_VAR, homedir()) ||
         (process.platform === "win32" ? "python" : "python3"),
       { nothrow: true }
-    )
+    )) || ""
   ).replaceAll("\\", "/");
 
   return `${pythonPath.replaceAll("\\", "/")}`;
@@ -36,40 +41,43 @@ export async function getPythonPath(): Promise<string> {
 export async function getPath(): Promise<string> {
   const settings = Settings.getInstance();
   if (settings === undefined) {
-    Logger.log("Error: Settings not initialized.");
+    Logger.error(LoggerSource.cmake, "Settings not initialized.");
 
     return "";
   }
 
   const ninjaPath = (
-    await which(
+    (await which(
       settings.getString(SettingsKey.ninjaPath)?.replace(HOME_VAR, homedir()) ||
         "ninja",
       { nothrow: true }
-    )
+    )) || ""
   ).replaceAll("\\", "/");
   const cmakePath = (
-    await which(
+    (await which(
       settings.getString(SettingsKey.cmakePath)?.replace(HOME_VAR, homedir()) ||
         "cmake",
       { nothrow: true }
-    )
+    )) || ""
   ).replaceAll("\\", "/");
-  Logger.log(
-    settings.getString(SettingsKey.python3Path)?.replace(HOME_VAR, homedir())
+  Logger.debug(
+    LoggerSource.cmake,
+    "Using python:",
+    settings.getString(SettingsKey.python3Path)?.replace(HOME_VAR, homedir()) ??
+      ""
   );
   // TODO: maybe also check for "python" on unix systems
   const pythonPath = await getPythonPath();
 
-  if (ninjaPath === null || cmakePath === null) {
+  if (ninjaPath.length === 0 || cmakePath.length === 0) {
     const missingTools = [];
-    if (ninjaPath === null) {
+    if (ninjaPath.length === 0) {
       missingTools.push("Ninja");
     }
-    if (cmakePath === null) {
+    if (cmakePath.length === 0) {
       missingTools.push("CMake");
     }
-    if (pythonPath === null) {
+    if (pythonPath.length === 0) {
       missingTools.push("Python 3");
     }
     void showRequirementsNotMetErrorMessage(missingTools);
@@ -91,18 +99,22 @@ export async function getPath(): Promise<string> {
 }
 
 export async function configureCmakeNinja(folder: Uri): Promise<boolean> {
-  const settings = Settings.getInstance();
-  if (settings === undefined) {
-    Logger.log("Error: Settings not initialized.");
+  if (process.platform !== "win32" && folder.fsPath.includes("\\")) {
+    const errorMsg =
+      "CMake currently does not support folder names with backslashes.";
+
+    Logger.error(LoggerSource.cmake, errorMsg);
+
+    await window.showErrorMessage(
+      "Failed to configure cmake for the current project. " + errorMsg
+    );
 
     return false;
   }
 
-  if (settings.getBoolean(SettingsKey.useCmakeTools)) {
-    await window.showErrorMessage(
-      "You must use the CMake Tools extension to configure your build. " +
-        "To use this extension instead, change the useCmakeTools setting."
-    );
+  const settings = Settings.getInstance();
+  if (settings === undefined) {
+    Logger.error(LoggerSource.cmake, "Settings not initialized.");
 
     return false;
   }
@@ -126,7 +138,8 @@ export async function configureCmakeNinja(folder: Uri): Promise<boolean> {
       }
 
       if (p1 !== p2) {
-        console.warn(
+        Logger.warn(
+          LoggerSource.cmake,
           `Build directory has been moved from ${p1} to ${p2}` +
             ` - Deleting CMakeCache.txt and regenerating.`
         );
@@ -134,6 +147,16 @@ export async function configureCmakeNinja(folder: Uri): Promise<boolean> {
         rmSync(join(buildDir, "CMakeCache.txt"));
       }
     }
+  }
+
+  if (settings.getBoolean(SettingsKey.useCmakeTools)) {
+    // CMake Tools integration is enabled - skip configuration
+    Logger.info(
+      LoggerSource.cmake,
+      "Skipping CMake configuration, as useCmakeTools is set."
+    );
+
+    return false;
   }
 
   try {
@@ -172,9 +195,7 @@ export async function configureCmakeNinja(folder: Uri): Promise<boolean> {
         const pythonPath = await getPythonPath();
 
         const command =
-          `${
-            process.env.ComSpec === "powershell.exe" ? "&" : ""
-          }"${cmake}" -DCMAKE_BUILD_TYPE=Debug ${
+          `${process.env.ComSpec === "powershell.exe" ? "&" : ""}"${cmake}" ${
             pythonPath.includes("/")
               ? `-DPython3_EXECUTABLE="${pythonPath.replaceAll("\\", "/")}" `
               : ""
@@ -188,9 +209,15 @@ export async function configureCmakeNinja(folder: Uri): Promise<boolean> {
           },
           (error, stdout, stderr) => {
             if (error) {
-              console.error(error);
-              console.log(`stdout: ${stdout}`);
-              console.log(`stderr: ${stderr}`);
+              Logger.error(LoggerSource.cmake, error);
+              Logger.warn(
+                LoggerSource.cmake,
+                `Stdout of failed cmake: ${stdout}`
+              );
+              Logger.warn(
+                LoggerSource.cmake,
+                `Stderr of failed cmake: ${stderr}`
+              );
             }
 
             return;
@@ -198,7 +225,7 @@ export async function configureCmakeNinja(folder: Uri): Promise<boolean> {
         );
 
         child.on("error", err => {
-          console.error(err);
+          Logger.error(LoggerSource.cmake, err);
         });
 
         //child.stdout?.on("data", data => {});
@@ -207,7 +234,10 @@ export async function configureCmakeNinja(folder: Uri): Promise<boolean> {
         });
         child.on("exit", code => {
           if (code !== 0) {
-            console.error(`CMake exited with code ${code ?? "unknown"}`);
+            Logger.error(
+              LoggerSource.cmake,
+              `CMake exited with code ${code ?? "N/A"}`
+            );
           }
           progress.report({ increment: 100 });
         });
@@ -219,7 +249,7 @@ export async function configureCmakeNinja(folder: Uri): Promise<boolean> {
     );
 
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -240,7 +270,7 @@ export async function cmakeUpdateBoard(
 
   const settings = Settings.getInstance();
   if (settings === undefined) {
-    Logger.log("Error: Settings not initialized.");
+    Logger.error(LoggerSource.cmake, "Settings not initialized.");
 
     return false;
   }
@@ -257,7 +287,10 @@ export async function cmakeUpdateBoard(
     );
 
     await writeFile(cmakeFilePath, modifiedContent, "utf8");
-    Logger.log("Updated board in CMakeLists.txt successfully.");
+    Logger.info(
+      LoggerSource.cmake,
+      "Updated board in CMakeLists.txt successfully."
+    );
 
     // reconfigure so .build gets updated
     // TODO: To get a behavior similar to the rm -rf Unix command,
@@ -269,11 +302,14 @@ export async function cmakeUpdateBoard(
       await rimraf(join(folder.fsPath, "build"), { maxRetries: 2 });
     }
     await configureCmakeNinja(folder);
-    Logger.log("Reconfigured CMake successfully.");
+    Logger.info(LoggerSource.cmake, "Reconfigured CMake successfully.");
 
     return true;
-  } catch (error) {
-    Logger.log("Error updating board in CMakeLists.txt!");
+  } catch {
+    Logger.error(
+      LoggerSource.cmake,
+      "Updating board in CMakeLists.txt failed!"
+    );
 
     return false;
   }
@@ -289,18 +325,22 @@ export async function cmakeUpdateBoard(
 export async function cmakeUpdateSDK(
   folder: Uri,
   newSDKVersion: string,
-  newToolchainVersion: string
+  newToolchainVersion: string,
+  newPicotoolVersion: string,
+  reconfigure: boolean = true
 ): Promise<boolean> {
   // TODO: support for scaning for seperate locations of the CMakeLists.txt file in the project
   const cmakeFilePath = join(folder.fsPath, "CMakeLists.txt");
-  const sdkPathRegex = /^set\(PICO_SDK_PATH\s+([^)]+)\)$/m;
-  const toolchainPathRegex = /^set\(PICO_TOOLCHAIN_PATH\s+([^)]+)\)$/m;
-  const toolsPathRegex = /^set\(pico-sdk-tools_DIR\s+([^)]+)\)$/m;
+  // This regex requires multiline (m) and dotall (s) flags to work
+  const updateSectionRegex = new RegExp(
+    `^# ${CMAKE_DO_NOT_EDIT_HEADER_PREFIX}.*# =+$`,
+    "ms"
+  );
   const picoBoardRegex = /^set\(PICO_BOARD\s+([^)]+)\)$/m;
 
   const settings = Settings.getInstance();
   if (settings === undefined) {
-    Logger.log("Error: Settings not initialized.");
+    Logger.error(LoggerSource.cmake, "Settings not initialized.");
 
     return false;
   }
@@ -311,20 +351,24 @@ export async function cmakeUpdateSDK(
 
     const content = await readFile(cmakeFilePath, "utf8");
 
-    let modifiedContent = content
-      .replace(
-        sdkPathRegex,
-        `set(PICO_SDK_PATH \${USERHOME}/.pico-sdk/sdk/${newSDKVersion})`
-      )
-      .replace(
-        toolchainPathRegex,
-        "set(PICO_TOOLCHAIN_PATH ${USERHOME}/.pico-sdk" +
-          `/toolchain/${newToolchainVersion})`
-      )
-      .replace(
-        toolsPathRegex,
-        `set(pico-sdk-tools_DIR \${USERHOME}/.pico-sdk/tools/${newSDKVersion})`
-      );
+    let modifiedContent = content.replace(
+      updateSectionRegex,
+      `# ${CMAKE_DO_NOT_EDIT_HEADER_PREFIX}\n` +
+        "if(WIN32)\n" +
+        "    set(USERHOME $ENV{USERPROFILE})\n" +
+        "else()\n" +
+        "    set(USERHOME $ENV{HOME})\n" +
+        "endif()\n" +
+        `set(sdkVersion ${newSDKVersion})\n` +
+        `set(toolchainVersion ${newToolchainVersion})\n` +
+        `set(picotoolVersion ${newPicotoolVersion})\n` +
+        `set(picoVscode ${buildCMakeIncPath(false)}/pico-vscode.cmake)\n` +
+        "if (EXISTS ${picoVscode})\n" +
+        "    include(${picoVscode})\n" +
+        "endif()\n" +
+        // eslint-disable-next-line max-len
+        "# ===================================================================================="
+    );
 
     const picoBoard = content.match(picoBoardRegex);
     // update the PICO_BOARD variable if it's a pico2 board and the new sdk
@@ -342,7 +386,10 @@ export async function cmakeUpdateSDK(
       });
 
       if (result === undefined) {
-        Logger.log("User canceled board type selection during SDK update.");
+        Logger.warn(
+          LoggerSource.cmake,
+          "User canceled board type selection during SDK update."
+        );
 
         return false;
       }
@@ -354,23 +401,31 @@ export async function cmakeUpdateSDK(
     }
 
     await writeFile(cmakeFilePath, modifiedContent, "utf8");
-    Logger.log("Updated paths in CMakeLists.txt successfully.");
+    Logger.debug(
+      LoggerSource.cmake,
+      "Updated paths in CMakeLists.txt successfully."
+    );
 
-    // reconfigure so .build gets updated
-    // TODO: To get a behavior similar to the rm -rf Unix command,
-    // use rmSync with options { recursive: true, force: true }
-    // to remove rimraf requirement
-    if (process.platform === "win32") {
-      await rimrafWindows(join(folder.fsPath, "build"), { maxRetries: 2 });
-    } else {
-      await rimraf(join(folder.fsPath, "build"), { maxRetries: 2 });
+    if (reconfigure) {
+      // reconfigure so .build gets updated
+      // TODO: To get a behavior similar to the rm -rf Unix command,
+      // use rmSync with options { recursive: true, force: true }
+      // to remove rimraf requirement
+      if (process.platform === "win32") {
+        await rimrafWindows(join(folder.fsPath, "build"), { maxRetries: 2 });
+      } else {
+        await rimraf(join(folder.fsPath, "build"), { maxRetries: 2 });
+      }
+      await configureCmakeNinja(folder);
+      Logger.info(LoggerSource.cmake, "Reconfigured CMake successfully.");
     }
-    await configureCmakeNinja(folder);
-    Logger.log("Reconfigured CMake successfully.");
 
     return true;
-  } catch (error) {
-    Logger.log("Error updating paths in CMakeLists.txt!");
+  } catch {
+    Logger.error(
+      LoggerSource.cmake,
+      "Updating paths in CMakeLists.txt failed!"
+    );
 
     return false;
   }
@@ -380,34 +435,56 @@ export async function cmakeUpdateSDK(
  * Extracts the sdk and toolchain versions from the CMakeLists.txt file.
  *
  * @param cmakeFilePath The path to the CMakeLists.txt file.
- * @returns An tupple with the [sdk, toolchain] versions or null if the file could not
+ * @returns An tupple with the [sdk, toolchain, picotool] versions or null if the file could not
  * be read or the versions could not be extracted.
  */
-export function cmakeGetSelectedToolchainAndSDKVersions(
-  cmakeFilePath: string
-): [string, string] | null {
+export async function cmakeGetSelectedToolchainAndSDKVersions(
+  folder: Uri
+): Promise<[string, string, string] | null> {
+  const cmakeFilePath = join(folder.fsPath, "CMakeLists.txt");
   const content = readFileSync(cmakeFilePath, "utf8");
+
+  // 0.15.1 and before
   const sdkPathRegex = /^set\(PICO_SDK_PATH\s+([^)]+)\)$/m;
   const toolchainPathRegex = /^set\(PICO_TOOLCHAIN_PATH\s+([^)]+)\)$/m;
-  const match = content.match(sdkPathRegex);
-  const match2 = content.match(toolchainPathRegex);
+  const oldMatch = content.match(sdkPathRegex);
+  const oldMatch2 = content.match(toolchainPathRegex);
 
-  if (match === null || match2 === null) {
+  // Current
+  const sdkVersionRegex = /^set\(sdkVersion\s+([^)]+)\)$/m;
+  const toolchainVersionRegex = /^set\(toolchainVersion\s+([^)]+)\)$/m;
+  const picotoolVersionRegex = /^set\(picotoolVersion\s+([^)]+)\)$/m;
+  const match = content.match(sdkVersionRegex);
+  const match2 = content.match(toolchainVersionRegex);
+  const match3 = content.match(picotoolVersionRegex);
+
+  if (match !== null && match2 !== null && match3 !== null) {
+    return [match[1], match2[1], match3[1]];
+  } else if (oldMatch !== null && oldMatch2 !== null) {
+    const path = oldMatch[1];
+    const path2 = oldMatch2[1];
+    const versionRegex = /^\${USERHOME}\/\.pico-sdk\/sdk\/([^)]+)$/m;
+    const versionRegex2 = /^\${USERHOME}\/\.pico-sdk\/toolchain\/([^)]+)$/m;
+    const versionMatch = path.match(versionRegex);
+    const versionMatch2 = path2.match(versionRegex2);
+
+    if (versionMatch === null || versionMatch2 === null) {
+      return null;
+    }
+
+    Logger.debug(LoggerSource.cmake, "Updating extension lines in CMake file");
+    await cmakeUpdateSDK(
+      folder,
+      versionMatch[1],
+      versionMatch2[1],
+      versionMatch[1]
+    );
+    Logger.debug(LoggerSource.cmake, "Extension lines updated");
+
+    return [versionMatch[1], versionMatch2[1], versionMatch[1]];
+  } else {
     return null;
   }
-
-  const path = match[1];
-  const path2 = match2[1];
-  const versionRegex = /^\${USERHOME}\/\.pico-sdk\/sdk\/([^)]+)$/m;
-  const versionRegex2 = /^\${USERHOME}\/\.pico-sdk\/toolchain\/([^)]+)$/m;
-  const versionMatch = path.match(versionRegex);
-  const versionMatch2 = path2.match(versionRegex2);
-
-  if (versionMatch === null || versionMatch2 === null) {
-    return null;
-  }
-
-  return [versionMatch[1], versionMatch2[1]];
 }
 
 /**
@@ -417,9 +494,7 @@ export function cmakeGetSelectedToolchainAndSDKVersions(
  * @returns An string with the board or null if the file could not
  * be read or the board could not be extracted.
  */
-export function cmakeGetSelectedBoard(
-  folder: Uri
-): string | null {
+export function cmakeGetSelectedBoard(folder: Uri): string | null {
   const cmakeFilePath = join(folder.fsPath, "CMakeLists.txt");
   const content = readFileSync(cmakeFilePath, "utf8");
 

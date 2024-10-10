@@ -1,138 +1,406 @@
 {
   "Blinky": {
       "path": "Basic_Demos/Blinky_Demo",
-      "name": "Blinky"
+      "name": "Blinky",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "GPIO Interrupt Demo": {
+  "GPIO_Interrupt_Demo": {
       "path": "Basic_Demos/GPIO_Interrupt_Demo",
-      "name": "GPIO_Interrupt_Demo"
+      "name": "GPIO_Interrupt_Demo",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Memory Experiment": {
+  "Memory_Experiment": {
       "path": "Basic_Demos/Memory_Experiment",
-      "name": "Memory_Experiment"
+      "name": "Memory_Experiment",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Audio Timer Interrupt DDS": {
+  "Audio_Timer_Interrupt_DDS": {
       "path": "Audio/a_Timer_Interrupt_DDS_Demo",
-      "name": "Timer_Interrupt_DDS_Demo"
+      "name": "Timer_Interrupt_DDS_Demo",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-   "Audio Multicore DDS Demo": {
+   "Audio_Multicore_DDS_Demo": {
       "path": "Audio/b_Multicore_DDS_Demo",
-      "name": "Multicore_DDS_Demo"
+      "name": "Multicore_DDS_Demo",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Audio Beep Synth (Single Core)": {
+  "Audio_Beep_Synth_(Single_Core)": {
       "path": "Audio/c_Audio_Beep_Synthesis_Single_Core",
-      "name": "Audio_Beep_Synthesis_Single_Core"
+      "name": "Audio_Beep_Synthesis_Single_Core",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Audio Beep Synth (Multicore)": {
+  "Audio_Beep_Synth_(Multicore)": {
       "path": "Audio/d_Audio_Beep_Synthesis_Multicore",
-      "name": "Audio_Beep_Synthesis_Multicore"
+      "name": "Audio_Beep_Synthesis_Multicore",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Audio DMA Demo": {
+  "Audio_DMA_Demo": {
       "path": "Audio/e_DMA_Demo",
-      "name": "DMA_Demo"
+      "name": "DMA_Demo",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Audio FFT Demo": {
+  "Audio_FFT_Demo": {
       "path": "Audio/f_Audio_FFT",
-      "name": "Audio_FFT"
+      "name": "Audio_FFT",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "GATT Client": {
+  "GATT_Client": {
       "path": "Bluetooth/GATT_Client",
-      "name": "GATT_Client"
+      "name": "GATT_Client",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico_w"
+        ],
+        "supportRiscV": false
   },
-  "GATT Server": {
+  "GATT_Server": {
       "path": "Bluetooth/GATT_Server",
-      "name": "GATT_Server"
+      "name": "GATT_Server",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico_w"
+        ],
+        "supportRiscV": false
   },
-  "Serial Bootloader": {
+  "Serial_Bootloader": {
       "path": "Bootloaders/Serial_bootloader/Bootloader",
-      "name": "Serial_Bootloader"
+      "name": "Serial_Bootloader",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Serial Bootloader (application)": {
+  "Serial_Bootloader_(application)": {
       "path": "Bootloaders/Serial_bootloader/Application",
-      "name": "Serial_Bootloader_Application"
+      "name": "Serial_Bootloader_Application",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Worm Bootloader": {
+  "Worm_Bootloader": {
       "path": "Bootloaders/Serial_worm/Bootloader",
-      "name": "Serial_Worm"
+      "name": "Serial_Worm",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Worm Bootloader (application)": {
+  "Worm_Bootloader_(application)": {
       "path": "Bootloaders/Serial_worm/Application",
-      "name": "Serial_Worm_Application"
+      "name": "Serial_Worm_Application",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
   "Keypad": {
       "path": "Human_Input/Keypad",
-      "name": "Keypad"
+      "name": "Keypad",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Resistive Touchscreen": {
+  "Resistive_Touchscreen": {
       "path": "Human_Input/Resistive_Touchscreen_Demo",
-      "name": "Resistive_Touchscreen"
+      "name": "Resistive_Touchscreen",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "CAN Bus": {
+  "CAN_Bus": {
       "path": "Networking/CAN",
-      "name": "CAN"
+      "name": "CAN",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "UDP Transmitter (PIO)": {
+  "UDP_Transmitter_(PIO)": {
       "path": "Networking/UDP_Transmitter",
-      "name": "UDP_TX_PIO"
+      "name": "UDP_TX_PIO",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "PWM Radio Beacon": {
+  "PWM_Radio_Beacon": {
       "path": "PWM/AM_Radio_Beacon",
-      "name": "AM_Beacon"
+      "name": "AM_Beacon",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "PWM Voice over Radio": {
+  "PWM_Voice_over_Radio": {
       "path": "PWM/AM_Radio_Voice",
-      "name": "AM_Voice"
+      "name": "AM_Voice",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "PWM Demo": {
+  "PWM_Demo": {
       "path": "PWM/PWM_Demo",
-      "name": "PWM_Demo"
+      "name": "PWM_Demo",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Protothreads Demo": {
+  "Protothreads_Demo": {
       "path": "Protothreads/Protothreads_Demo",
-      "name": "Protothreads_Demo"
+      "name": "Protothreads_Demo",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "MPU6050 IMU": {
+  "MPU6050_IMU": {
       "path": "Sensors/MPU6050_IMU_Demo",
-      "name": "IMU_Demo"
+      "name": "IMU_Demo",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Stepper Motors (delta robot demo)": {
+  "Stepper_Motors_(delta_robot_demo)": {
       "path": "Stepper_Motors/Delta_Robot_Demo",
-      "name": "Delta_Robot"
+      "name": "Delta_Robot",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Stepper Motors (position and speed)": {
+  "Stepper_Motors_(position_and_speed)": {
       "path": "Stepper_Motors/Stepper_Position_And_Speed_Control",
-      "name": "Position_and_Speed"
+      "name": "Position_and_Speed",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Stepper Motors (position)": {
+  "Stepper_Motors_(position)": {
       "path": "Stepper_Motors/Stepper_Position_Control",
-      "name": "Position"
+      "name": "Position",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "Stepper Motors (speed)": {
+  "Stepper_Motors_(speed)": {
       "path": "Stepper_Motors/Stepper_Speed_Control",
-      "name": "Speed"
+      "name": "Speed",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "VGA Animation Demo": {
+  "VGA_Animation_Demo": {
       "path": "VGA_Graphics/Animation_Demo",
-      "name": "Animation"
+      "name": "Animation",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "VGA Barnsley Fern": {
+  "VGA_Barnsley_Fern": {
       "path": "VGA_Graphics/Barnsley_Fern",
-      "name": "Barnsley_Fern"
+      "name": "Barnsley_Fern",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "VGA Conway's Game of Life": {
+  "VGA_Conways_Game_of_Life": {
       "path": "VGA_Graphics/Game_of_Life",
-      "name": "Game_of_Life"
+      "name": "Game_of_Life",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "VGA Mandelbrot Set": {
+  "VGA_Mandelbrot_Set": {
       "path": "VGA_Graphics/Mandelbrot_Set",
-      "name": "Mandelbrot"
+      "name": "Mandelbrot",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "VGA Fonts and Colors Demo": {
+  "VGA_Fonts_and_Colors_Demo": {
       "path": "VGA_Graphics/VGA_Fonts_and_Colors",
-      "name": "Fonts_and_Colors"
+      "name": "Fonts_and_Colors",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   },
-  "VGA Graphics Primitives": {
+  "VGA_Graphics_Primitives": {
       "path": "VGA_Graphics/VGA_Graphics_Primitives",
-      "name": "Graphics_Primitives"
+      "name": "Graphics_Primitives",
+      "libPaths": [],
+        "libNames": [],
+        "boards": [
+            "pico",
+            "pico_w",
+            "pico2"
+        ],
+        "supportRiscV": false
   }
 }

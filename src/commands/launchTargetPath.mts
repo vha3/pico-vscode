@@ -63,14 +63,15 @@ export default class LaunchTargetPathCommand extends CommandWithResult<string> {
 
     const settings = Settings.getInstance();
     if (
-      settings !== undefined && settings.getBoolean(SettingsKey.useCmakeTools)
+      settings !== undefined &&
+      settings.getBoolean(SettingsKey.useCmakeTools)
     ) {
       // Compile with CMake Tools
       const path: string = await commands.executeCommand(
         "cmake.launchTargetPath"
       );
       if (path) {
-        return path;
+        return path.replaceAll("\\", "/");
       }
     }
 

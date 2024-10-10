@@ -11,8 +11,6 @@ class State {
   cmakeMode;
   // cmakePath; setting the path of a file input is not supported
   cmakeVersion;
-  pythonMode;
-  // pythonPath; setting the path of a file input is not supported
   uartStdioSupport;
   usbStdioSupport;
   spiFeature;
@@ -24,22 +22,26 @@ class State {
   hwinterpolationFeature;
   hwtimerFeature;
   picoWirelessSelection;
-  addExamplesCodeGen;
   runFromRamCodeGen;
+  entryProjectNameCodeGen;
   cppCodeGen;
   cppRttiCodeGen;
   cppExceptionsCodeGen;
   selRiscv;
   debuggerSelection;
+  useCMakeTools;
 
   // special ui only state
   uiShowAdvancedOptions;
+  isImportProject;
+  forceFromExample;
+  manuallyFromExample;
 
   constructor() { }
 }
 
 function restoreState(state) {
-  console.debug("Restoring state from previous session");
+  console.debug("[raspbery-pi-pico - new project panel - state] Restoring state from previous session");
   // load state
   if (state.projectName) {
     document.getElementById('inp-project-name').value = state.projectName;
@@ -69,9 +71,6 @@ function restoreState(state) {
   if (state.cmakeVersion) {
     document.getElementById('sel-cmake').value = state.cmakeVersion;
   }
-  if (state.pythonVersion) {
-    document.getElementById('sel-python').value = state.pythonVersion;
-  }
 
   /* setting the path of a file input is not supported
   if (state.ninjaPath !== undefined) {
@@ -80,10 +79,6 @@ function restoreState(state) {
 
   if (state.cmakePath !== undefined) {
     document.getElementById('cmake-path-executable').value = state.cmakePath;
-  }
-
-  if (state.pythonPath !== undefined) {
-    document.getElementById('python-path-executable').value = state.pythonPath;
   }
   */
 
@@ -127,12 +122,12 @@ function restoreState(state) {
     document.getElementById('hwtimer-features-cblist').checked = state.hwtimerFeature;
   }
 
-  if (state.addExamplesCodeGen !== undefined) {
-    document.getElementById('add-examples-code-gen-cblist').checked = state.addExamplesCodeGen;
-  }
-
   if (state.runFromRamCodeGen !== undefined) {
     document.getElementById('run-from-ram-code-gen-cblist').checked = state.runFromRamCodeGen;
+  }
+
+  if (state.entryProjectNameCodeGen !== undefined) {
+    document.getElementById('entry-project-name-code-gen-cblist').checked = state.entryProjectNameCodeGen;
   }
 
   if (state.cppCodeGen !== undefined) {
@@ -154,10 +149,14 @@ function restoreState(state) {
     document.getElementById('pico-wireless-radio-background').checked = state.picoWirelessSelection == 3;
   }
   // instead of setting debug-probe if selection is undefined or 0, 
-  // first check so the default can be controlled in the html 
+  // first check so the default can be controlled in the html
   if (state.debuggerSelection !== undefined) {
     document.getElementById('debugger-radio-debug-probe').checked = state.debuggerSelection == 0;
     document.getElementById('debugger-radio-swd').checked = state.debuggerSelection == 1;
+  }
+
+  if (state.useCMakeTools !== undefined) {
+    document.getElementById('use-cmake-tools-cb').checked = state.useCMakeTools;
   }
 
   // instead of setting ninja-radio-default-version if selection is undefined or 0, 
@@ -190,33 +189,72 @@ function restoreState(state) {
     document.getElementById('cmake-radio-path-executable').checked = state.cmakeMode == 3;
   }
 
-  if (state.pythonMode !== undefined && document.getElementById('python-radio-path-executable') !== undefined) {
-    const pythonDefaultVersionRadio = document.getElementById('python-radio-default-version');
-    if (pythonDefaultVersionRadio) {
-      pythonDefaultVersionRadio.checked = state.pythonMode == 0;
+  if (state.selRiscv !== undefined) {
+    const selRiscv = document.getElementById('sel-riscv');
+    if (selRiscv) {
+      selRiscv.checked = state.selRiscv;
     }
-    const pythonSystemVersionRadio = document.getElementById('python-radio-system-version');
-    // not available in the DOM is system python is not available
-    if (pythonSystemVersionRadio) {
-      pythonSystemVersionRadio.checked = state.pythonMode == 1;
-    }
-    document.getElementById('python-radio-path-executable').checked = state.pythonMode == 2;
   }
 
   // ui state
   if (state.uiShowAdvancedOptions) {
     document.getElementById('btn-advanced-options').click();
   }
+  if (!forceCreateFromExample && !doProjectImport && state.manuallyFromExample) {
+    console.debug("[raspbery-pi-pico - new project panel - state] Manually triggering create from example");
+
+    // will crash the webview to set it on disable and click create from example
+    /*const pni = document.getElementById('inp-project-name');
+    if (pni) {
+      // disable it for user input
+      //pni.disabled = true;
+    }*/
+    setTimeout(() => {
+      document.getElementById('btn-create-from-example').click();
+      // now reenter the name like a user so on keyup event is triggered at the end
+      const pni = document.getElementById('inp-project-name');
+      if (pni) {
+        //pni.disabled = false;
+        pni.value = state.projectName;
+        if (state.projectName.length > 0) {
+          const key = state.projectName[0];
+          const keyUpEvent = new KeyboardEvent('keyup', { key: key, code: `Key${key.toUpperCase()}`, bubbles: true });
+          pni.dispatchEvent(keyUpEvent);
+          // send enter key down event
+          const enterKeyEvent = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true });
+          pni.dispatchEvent(enterKeyEvent);
+        }
+      }
+    }, 1500);
+  }
 }
 
 function setupStateSystem(vscode) {
   document.addEventListener('DOMContentLoaded', function () {
     const oldState = vscode.getState();
+    const oldStateIsImportProject = oldState && oldState.isImportProject;
+    const oldStateForceFromExample = oldState && oldState.forceFromExample;
     const state = oldState || new State();
+    state.isImportProject = doProjectImport;
+    state.forceFromExample = forceCreateFromExample;
 
     // restore state
     if (oldState !== null) {
       restoreState(state);
+    }
+
+    if (((state.forceFromExample || state.isImportProject) && oldState === null)
+      || (oldState !== null && oldStateIsImportProject !== state.isImportProject)
+      || (oldState !== null && oldStateForceFromExample !== state.forceFromExample)) {
+      // call set state
+      vscode.setState(state);
+    }
+
+    if (!state.forceFromExample && !state.isImportProject) {
+      document.getElementById("btn-create-from-example").addEventListener("click", function () {
+        state.manuallyFromExample = true;
+        vscode.setState(state);
+      });
     }
 
     // add on change event to all inputs to save state
@@ -294,19 +332,6 @@ function setupStateSystem(vscode) {
                 break;
             }
             break;
-          case "python-version-radio":
-            switch (radio.id) {
-              case "python-radio-default-version":
-                state.pythonMode = parseInt(radio.value);
-                break;
-              case "python-radio-system-version":
-                state.pythonMode = parseInt(radio.value);
-                break;
-              case "python-radio-path-executable":
-                state.pythonMode = parseInt(radio.value);
-                break;
-            }
-            break;
           case "pico-wireless-radio":
             switch (radio.id) {
               case "pico-wireless-radio-none":
@@ -371,11 +396,11 @@ function setupStateSystem(vscode) {
           case "usb-stdio-support-cblist":
             state.usbStdioSupport = checkbox.checked;
             break;
-          case "add-examples-code-gen-cblist":
-            state.addExamplesCodeGen = checkbox.checked;
-            break;
           case "run-from-ram-code-gen-cblist":
             state.runFromRamCodeGen = checkbox.checked;
+            break;
+          case "entry-project-name-code-gen-cblist":
+            state.entryProjectNameCodeGen = checkbox.checked;
             break;
           case "cpp-code-gen-cblist":
             state.cppCodeGen = checkbox.checked;
@@ -388,6 +413,9 @@ function setupStateSystem(vscode) {
             break;
           case "sel-riscv":
             state.selRiscv = checkbox.checked;
+            break;
+          case "use-cmake-tools-cb":
+            state.useCMakeTools = checkbox.checked;
             break;
         }
 
@@ -405,11 +433,8 @@ function setupStateSystem(vscode) {
           case "cmake-path-executable":
             state.cmakePath = file.files[0].name;
             break;
-          case "python-path-executable":
-            state.pythonPath = file.files[0].name;
-            break;
         }
-
+  
         vscode.setState(state);
       });
     });

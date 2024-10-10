@@ -1,17 +1,20 @@
 import { join as joinPosix } from "path/posix";
-import Logger from "../logger.mjs";
+import Logger, { LoggerSource } from "../logger.mjs";
 import { existsSync, readFileSync, rmSync } from "fs";
 import { homedir } from "os";
 import {
-  getGit, sparseCheckout, sparseCloneRepository, execAsync
+  getGit,
+  sparseCheckout,
+  sparseCloneRepository,
+  execAsync,
 } from "./gitUtil.mjs";
 import Settings from "../settings.mjs";
-import { checkForInstallationRequirements } from "./requirementsUtil.mjs";
+import { checkForGit } from "./requirementsUtil.mjs";
 import { cp } from "fs/promises";
 import { get } from "https";
-import {
-  isInternetConnected, CURRENT_DATA_VERSION, getDataRoot
-} from "./downloadHelpers.mjs";
+import { isInternetConnected, getDataRoot } from "./downloadHelpers.mjs";
+import { unknownErrorToString } from "./errorHelper.mjs";
+import { CURRENT_DATA_VERSION } from "./sharedConstants.mjs";
 
 const EXAMPLES_REPOSITORY_URL =
   "https://github.com/vha3/Hunter-Adams-RP2040-Demos.git";
@@ -25,6 +28,10 @@ const EXAMPLES_TAG =
 export interface Example {
   path: string;
   name: string;
+  libPaths: [string];
+  libNames: [string];
+  boards: [string];
+  supportRiscV: boolean;
   searchKey: string;
 }
 
@@ -32,6 +39,10 @@ interface ExamplesFile {
   [key: string]: {
     path: string;
     name: string;
+    libPaths: [string];
+    libNames: [string];
+    boards: [string];
+    supportRiscV: boolean;
   };
 }
 
@@ -46,21 +57,33 @@ function parseExamplesJson(data: string): Example[] {
     return Object.keys(examples).map(key => ({
       path: examples[key].path,
       name: examples[key].name,
+      libPaths: examples[key].libPaths,
+      libNames: examples[key].libNames,
+      boards: examples[key].boards,
+      supportRiscV: examples[key].supportRiscV,
       searchKey: key,
     }));
-  } catch {
-    Logger.log("Failed to parse examples.json");
+  } catch (error) {
+    Logger.error(
+      LoggerSource.examples,
+      "Failed to parse examples.json.",
+      unknownErrorToString(error)
+    );
 
     return [];
   }
 }
 
+/**
+ * Downloads the examples list from the internet or loads the included examples.json.
+ *
+ * @returns A promise that resolves with an array of Example objects.
+ */
 export async function loadExamples(): Promise<Example[]> {
   try {
     if (!(await isInternetConnected())) {
       throw new Error(
-        "Error while downloading examples list. " +
-          "No internet connection"
+        "Error while downloading examples list. " + "No internet connection"
       );
     }
     const result = await new Promise<Example[]>((resolve, reject) => {
@@ -94,12 +117,18 @@ export async function loadExamples(): Promise<Example[]> {
       });
     });
 
-    // TODO: Logger.debug
-    Logger.log(`Successfully downloaded examples list from the internet.`);
+    Logger.info(
+      LoggerSource.examples,
+      "Successfully downloaded examples list from the internet."
+    );
 
     return result;
   } catch (error) {
-    Logger.log(error instanceof Error ? error.message : (error as string));
+    Logger.warn(
+      LoggerSource.examples,
+      "Failed to download examples:",
+      unknownErrorToString(error)
+    );
 
     try {
       const examplesFile = readFileSync(
@@ -107,8 +136,12 @@ export async function loadExamples(): Promise<Example[]> {
       );
 
       return parseExamplesJson(examplesFile.toString("utf-8"));
-    } catch (e) {
-      Logger.log("Failed to load examples.json");
+    } catch (error) {
+      Logger.error(
+        LoggerSource.examples,
+        "Failed to load included examples.json.",
+        unknownErrorToString(error)
+      );
 
       return [];
     }
@@ -130,18 +163,18 @@ export async function setupExample(
   }
 
   // TODO: this does take about 2s - may be reduced
-  const requirementsCheck = await checkForInstallationRequirements(
-    settings
-  );
+  const requirementsCheck = await checkForGit(settings);
   if (!requirementsCheck) {
     return false;
   }
 
   const gitPath = await getGit(settings);
 
-  if (existsSync(examplesRepoPath)) {
+  if (existsSync(joinPosix(examplesRepoPath, ".git"))) {
     const ref = await execAsync(
-      `cd "${examplesRepoPath}" && ${
+      `cd ${
+        process.env.ComSpec?.endsWith("cmd.exe") ? "/d " : " "
+      }"${examplesRepoPath}" && ${
         process.env.ComSpec === "powershell.exe" ? "&" : ""
       }"${gitPath}" rev-parse HEAD`
     );
@@ -165,14 +198,18 @@ export async function setupExample(
     }
   }
 
-  Logger.log(`Spare-checkout selected example: ${example.name}`);
-  const result = await sparseCheckout(
-    examplesRepoPath,
-    example.path,
-    gitPath
-  );
+  Logger.log(`Sparse-checkout selected example: ${example.name}`);
+  const result = await sparseCheckout(examplesRepoPath, example.path, gitPath);
   if (!result) {
     return result;
+  }
+
+  for (const libPath of example.libPaths) {
+    Logger.log(`Sparse-checkout selected example required path: ${libPath}`);
+    const result = await sparseCheckout(examplesRepoPath, libPath, gitPath);
+    if (!result) {
+      return result;
+    }
   }
 
   Logger.log(`Copying example from ${absoluteExamplePath} to ${targetPath}`);
@@ -180,6 +217,23 @@ export async function setupExample(
   await cp(absoluteExamplePath, joinPosix(targetPath, example.searchKey), {
     recursive: true,
   });
+
+  for (let i = 0; i < example.libPaths.length; i++) {
+    const libPath = example.libPaths[i];
+    const libName = example.libNames[i];
+    const absoluteLibPath = joinPosix(examplesRepoPath, libPath);
+    Logger.log(
+      `Copying example required path from ${absoluteLibPath} ` +
+        `to ${targetPath}/${example.searchKey}/${libName}`
+    );
+    // TODO: use example.name or example.search key for project folder name?
+    await cp(
+      absoluteLibPath,
+      joinPosix(targetPath, example.searchKey, libName),
+      { recursive: true }
+    );
+  }
+
   Logger.log("Done copying example.");
 
   return result;

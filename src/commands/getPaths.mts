@@ -1,15 +1,23 @@
 import { CommandWithResult } from "./command.mjs";
 import { commands, workspace } from "vscode";
 import {
-  getPythonPath, getPath,
-  cmakeGetSelectedToolchainAndSDKVersions, cmakeGetPicoVar
+  getPythonPath,
+  getPath,
+  cmakeGetSelectedToolchainAndSDKVersions,
+  cmakeGetPicoVar,
 } from "../utils/cmakeUtil.mjs";
 import { join } from "path";
-import { buildToolchainPath } from "../utils/download.mjs";
+import {
+  buildPicotoolPath,
+  buildToolchainPath,
+  downloadAndInstallPicotool,
+} from "../utils/download.mjs";
 import Settings, { SettingsKey } from "../settings.mjs";
+import which from "which";
+import { execSync } from "child_process";
+import { getPicotoolReleases } from "../utils/githubREST.mjs";
 
-export class GetPythonPathCommand
-                      extends CommandWithResult<string> {
+export class GetPythonPathCommand extends CommandWithResult<string> {
   constructor() {
     super("getPythonPath");
   }
@@ -28,8 +36,7 @@ export class GetPythonPathCommand
   }
 }
 
-export class GetEnvPathCommand
-                      extends CommandWithResult<string> {
+export class GetEnvPathCommand extends CommandWithResult<string> {
   constructor() {
     super("getEnvPath");
   }
@@ -48,13 +55,12 @@ export class GetEnvPathCommand
   }
 }
 
-export class GetGDBPathCommand
-                      extends CommandWithResult<string> {
+export class GetGDBPathCommand extends CommandWithResult<string> {
   constructor() {
     super("getGDBPath");
   }
 
-  execute(): string {
+  async execute(): Promise<string> {
     if (
       workspace.workspaceFolders === undefined ||
       workspace.workspaceFolders.length === 0
@@ -65,9 +71,7 @@ export class GetGDBPathCommand
     const workspaceFolder = workspace.workspaceFolders?.[0];
 
     const selectedToolchainAndSDKVersions =
-    cmakeGetSelectedToolchainAndSDKVersions(
-      join(workspaceFolder.uri.fsPath, "CMakeLists.txt")
-    );
+      await cmakeGetSelectedToolchainAndSDKVersions(workspaceFolder.uri);
     if (selectedToolchainAndSDKVersions === null) {
       return "";
     }
@@ -82,6 +86,20 @@ export class GetGDBPathCommand
       }
     } else if (process.platform === "linux") {
       // Arm toolchains have incorrect libncurses versions on Linux (specifically RPiOS)
+      const gdbPath = await which("gdb", { nothrow: true });
+      if (gdbPath !== null) {
+        // Test if system gdb supports arm_any architecture - throws an error if it's not available
+        try {
+          execSync(`"${gdbPath}" --batch -ex "set arch arm_any"`, {
+            stdio: "pipe",
+          });
+
+          return "gdb";
+        } catch {
+          //pass
+        }
+      }
+      // Default to gdb on arm64
       if (process.arch === "arm64") {
         return "gdb";
       } else {
@@ -93,8 +111,45 @@ export class GetGDBPathCommand
   }
 }
 
-export class GetChipCommand
-                      extends CommandWithResult<string> {
+export class GetCompilerPathCommand extends CommandWithResult<string> {
+  constructor() {
+    super("getCompilerPath");
+  }
+
+  async execute(): Promise<string> {
+    if (
+      workspace.workspaceFolders === undefined ||
+      workspace.workspaceFolders.length === 0
+    ) {
+      return "";
+    }
+
+    const workspaceFolder = workspace.workspaceFolders?.[0];
+
+    const selectedToolchainAndSDKVersions =
+      await cmakeGetSelectedToolchainAndSDKVersions(workspaceFolder.uri);
+    if (selectedToolchainAndSDKVersions === null) {
+      return "";
+    }
+    const toolchainVersion = selectedToolchainAndSDKVersions[1];
+
+    let triple = "arm-none-eabi";
+    if (toolchainVersion.includes("RISCV")) {
+      if (toolchainVersion.includes("COREV")) {
+        triple = "riscv32-corev-elf";
+      } else {
+        triple = "riscv32-unknown-elf";
+      }
+    }
+
+    return join(
+      buildToolchainPath(toolchainVersion), "bin",
+      triple + `-gcc${process.platform === "win32" ? ".exe" : ""}`
+    );
+  }
+}
+
+export class GetChipCommand extends CommandWithResult<string> {
   constructor() {
     super("getChip");
   }
@@ -112,7 +167,8 @@ export class GetChipCommand
     const settings = Settings.getInstance();
     let buildDir = join(workspaceFolder.uri.fsPath, "build");
     if (
-      settings !== undefined && settings.getBoolean(SettingsKey.useCmakeTools)
+      settings !== undefined &&
+      settings.getBoolean(SettingsKey.useCmakeTools)
     ) {
       // Compiling with CMake Tools
       const cmakeBuildDir: string = await commands.executeCommand(
@@ -124,8 +180,7 @@ export class GetChipCommand
       }
     }
 
-    const platform =
-    cmakeGetPicoVar(
+    const platform = cmakeGetPicoVar(
       join(buildDir, "CMakeCache.txt"),
       "PICO_PLATFORM"
     );
@@ -141,8 +196,20 @@ export class GetChipCommand
   }
 }
 
-export class GetTargetCommand
-                      extends CommandWithResult<string> {
+export class GetChipUppercaseCommand extends CommandWithResult<string> {
+  constructor() {
+    super("getChipUppercase");
+  }
+
+  async execute(): Promise<string> {
+    const cmd = new GetChipCommand();
+    const chip = await cmd.execute();
+
+    return chip.toUpperCase();
+  }
+}
+
+export class GetTargetCommand extends CommandWithResult<string> {
   constructor() {
     super("getTarget");
   }
@@ -160,7 +227,8 @@ export class GetTargetCommand
     const settings = Settings.getInstance();
     let buildDir = join(workspaceFolder.uri.fsPath, "build");
     if (
-      settings !== undefined && settings.getBoolean(SettingsKey.useCmakeTools)
+      settings !== undefined &&
+      settings.getBoolean(SettingsKey.useCmakeTools)
     ) {
       // Compiling with CMake Tools
       const cmakeBuildDir: string = await commands.executeCommand(
@@ -172,8 +240,7 @@ export class GetTargetCommand
       }
     }
 
-    const platform =
-    cmakeGetPicoVar(
+    const platform = cmakeGetPicoVar(
       join(buildDir, "CMakeCache.txt"),
       "PICO_PLATFORM"
     );
@@ -188,5 +255,53 @@ export class GetTargetCommand
     } else {
       return "rp2040";
     }
+  }
+}
+
+export class GetPicotoolPathCommand extends CommandWithResult<
+  string | undefined
+> {
+  private running: boolean = false;
+
+  constructor() {
+    super("getPicotoolPath");
+  }
+
+  async execute(): Promise<string | undefined> {
+    if (this.running) {
+      return undefined;
+    }
+    this.running = true;
+
+    // get latest release
+    const picotoolReleases = await getPicotoolReleases();
+
+    if (picotoolReleases === null) {
+      this.running = false;
+
+      return undefined;
+    }
+
+    // it is sorted latest to oldest
+    const picotoolVersion = picotoolReleases[0];
+
+    // check if it is installed if not install it
+    const result = await downloadAndInstallPicotool(picotoolVersion);
+
+    if (result === null || !result) {
+      this.running = false;
+
+      return undefined;
+    }
+
+    this.running = false;
+
+    // TODO: maybe move "picotool" into buildPath or install it so the files
+    // are in root of buildPath
+    return join(
+      buildPicotoolPath(picotoolVersion),
+      "picotool",
+      process.platform === "win32" ? "picotool.exe" : "picotool"
+    );
   }
 }

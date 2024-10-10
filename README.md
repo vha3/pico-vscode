@@ -1,74 +1,116 @@
 # Raspberry Pi Pico Visual Studio Code extension
 
-> NOTE: The extension is still under development.
+> **Note: The extension is currently under development.**
 
-This is the official Visual Studio Code extension for Raspberry Pi Pico development. It provides a set of tools to help you get started with development for the Pico boards using Visual Studio Code and the official [Pico SDK](https://github.com/raspberrypi/pico-sdk).
+This is the official Visual Studio Code extension for Raspberry Pi Pico development. This extension equips you with a suite of tools designed to streamline your Pico projects using Visual Studio Code and the official [Pico SDK](https://github.com/raspberrypi/pico-sdk).
 
-This extension is documented in the [Getting started with Raspberry Pi Pico](https://datasheets.raspberrypi.com/pico/getting-started-with-pico.pdf) PDF
+For comprehensive setup instructions, refer to the [Getting Started guide](https://datasheets.raspberrypi.com/pico/getting-started-with-pico.pdf) PDF.
 
-[Download latest Beta RC 📀](https://github.com/raspberrypi/pico-vscode/releases)
+[Download latest Beta 📀](https://github.com/raspberrypi/pico-vscode/releases)
 
 ## Features
 
-- Project generator (targets ninja build-system)
-- Automatic CMake configuration on project load
-- Easy option to switch between different versions of the Pico-SDK and tools
-- No configuration of environment variables required
-- Automatic download/management of Toolchain and SDK and some tools (no separate manual download/installation required)
-- One-click project compilation per status bar button (with the selected Pico-SDK and tools)
-- Offline documentation for the Pico-SDK
+### Project Setup and Management
+
+- **Project Generator**: Easily create and configure new projects with support for advanced Pico features like I2C and PIO. The generator targets the Ninja build system and allows customization during project creation.
+- **Quick Project Setup**: Initiate new Pico projects directly from the Explorer view, when no workspace is open.
+- **MicroPython Support**: Create and develop MicroPython-based Pico projects with support provided through the [MicroPico](https://github.com/paulober/MicroPico) extension.
+
+### Configuration and Tool Management
+
+- **Automatic CMake Configuration**: Automatically configures CMake when loading a project.
+- **Version Switching**: Seamlessly switch between different versions of the Pico SDK and tools.
+- **No Manual Setup Required**: Automatically handles environment variables, toolchain, SDK, and tool management.
+- **Includes an Uninstaller**: Easily remove the extension along with all automatically installed tools and SDKs.
+
+### Build, Debug, and Documentation
+
+- **One-Click Compilation and Debugging**: Automatically configure OpenOCD, Ninja, and CMake, allowing you to compile and debug with a single click.
+- **Offline Documentation**: Conveniently access Pico SDK documentation directly within the editor, even when offline.
+
+- **Version Switching**: Seamlessly switch between different versions of the Pico SDK and tools.
+- **No Manual Setup Required**: The extension handles environment variables, toolchain, SDK, and tool management for you.
+- **One-Click Compilation**: Compile projects directly from the status bar with your selected SDK and tools.
+- **Offline Documentation**: Access Pico SDK documentation offline.
+- **Quick Project Setup**: Quickly create new Pico projects from the Explorer view when no workspace is open.
+- **MicroPython Support**: Create MicroPython-based Pico projects with support provided through the MicroPico extension.
 
 ## Requirements by OS
 
-> Supported Platforms: Windows x64, macOS (Sonoma and newer only), Linux x64 and arm64
+> **Supported Platforms: Raspberry Pi OS (64-bit), Windows 10/11 (x86_64), macOS Sonoma (14.0) and newer, Linux x64 and arm64**
 
-- Visual Studio Code v1.87.0 or later
+- Visual Studio Code v1.92.1 or later
+
+### Raspberry Pi OS and Windows
+
+No additional requirements are needed.
 
 ### macOS
-All requirements for macOS can be installed by running `xcode-select --install` from Terminal
-- Git (in PATH)
-- Tar (in PATH)
-- Native C/C++ compiler (in PATH), supported compilers are: `gcc` and `clang`
-
-### Raspberry Pi OS
-As of March 2024, all new Raspberry Pi OS images come with the requirements pre-installed.
-On older images the requirements can be installed by running `sudo apt install openocd ninja-build`
+To meet the requirements for macOS, run the following command in Terminal to install necessary tools:
+```zsh
+xcode-select --install
+```
+This command installs all of the necessary tools, including but not limited to:
+- **Git 2.28 or later** (ensure it's in your PATH)
+- **Tar** (ensure it's in your PATH)
 
 ### Linux
-- Python 3.9 or later (in PATH or set in settings)
-- Git (in PATH)
-- Tar (in PATH)
-- Native C/C++ compiler (in PATH), supported compilers are: `gcc` and `clang`
-- \[Optional\] OpenOCD for debugging (Raspberry Pi OS only)
-- \[Optional\] gdb-multiarch for debugging (x86_64 only)
+- **Python 3.9 or later** (ensure it’s in your PATH or set in settings)
+- **Git 2.28 or later** (ensure it’s in your PATH)
+- **Tar** (ensure it’s in your PATH)
+- **\[Optional\]** gdb-multiarch for debugging (x86_64 only)
+- For **\[Ubuntu 22.04\]**, install `libftdi1-2` and `libhidapi-hidraw0` packages to use OpenOCD
 
 ## Extension Settings
 
-This extension contributes the following settings:
+This extension provides the following settings:
 
-* `raspberry-pi-pico.cmakePath`: Set custom cmake path
-* `raspberry-pi-pico.python3Path`: Set custom python3 path
-* `raspberry-pi-pico.ninjaPath`: Set custom ninja path
-* `raspberry-pi-pico.gitPath`: Set custom git path
-* `raspberry-pi-pico.cmakeAutoConfigure`: Enable/Disable cmake auto configure on project load
-* `raspberry-pi-pico.githubToken`: Takes a GitHub personal access token (classic) with the `public_repo` scope. It is used to check GitHub for available versions of the Pico SDK and other tools. Without one, the extension will use the GitHub API unauthenticated, which has a much lower rate limit causing many features to not work properly if the limit is reached. The unauthenticated rate limit is per public IP address, so this is more likely to be necessary if you share your IP address with many other users.
+* `raspberry-pi-pico.cmakePath`: Specify a custom path for CMake.
+* `raspberry-pi-pico.python3Path`: Specify a custom path for Python 3 _(machine scoped)_.
+* `raspberry-pi-pico.ninjaPath`: Specify a custom path for Ninja.
+* `raspberry-pi-pico.gitPath`: Specify a custom path for Git.
+* `raspberry-pi-pico.cmakeAutoConfigure`: Provide a GitHub personal access token (classic) with the `public_repo` scope. This token is used to check for available versions of the Pico SDK and other tools. Without it, the extension uses the unauthenticated GitHub API, which has a lower rate limit and may lead to restricted functionality if the limit is exceeded. The unauthenticated rate limit is per public IP address, so a token is more necessary if your IP is shared with many users.
+
+## CMake Tools Extension Integration
+
+For more complex projects, such as those with multiple executables or when the project name is defined as a variable, this extension can integrate with the CMake Tools extension to enhance CMake parsing. You can enable CMake Tools integration during project generation under the **Advanced Options**. Additionally, to manually enable it, adjust the following settings in your `settings.json`:
+
+- `raspberry-pi-pico.cmakeAutoConfigure`: Set from `true` to `false`.
+- `raspberry-pi-pico.useCmakeTools`: Set from `false` to `true`.
+
+For optimal functionality, consider enabling:
+
+- `cmake.configureOnEdit`: true
+- `cmake.automaticReconfigure`: true
+- `cmake.configureOnOpen`: true
+
+When prompted, select the `Pico` kit in CMake Tools, and set your build and launch targets accordingly. Use CMake Tools for compilation, but continue using this extension for debugging, as CMake Tools debugging is not compatible with Pico.
+
+## VS Code Profiles
+
+If you work with multiple microcontroller toolchains, consider installing this extension into a [VS Code Profile](https://code.visualstudio.com/docs/editor/profiles) to avoid conflicts with other toolchains. Follow these steps:
+
+1. Download the sample profile from [here](scripts/Pico.code-profile).
+2. Open Command Palette with `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS) and select `Profiles: Import Profile`.
+3. Import the downloaded file to install the extension in a dedicated Pico profile.
+4. This setup helps isolate the Pico extension from other extensions, reducing the risk of conflicts.
 
 ## Known Issues
 
-- Custom Ninja, Python3 and git paths are not stored in `CMakeLists.txt` like the SDK and Toolchain paths, so using them requires the user to build and configure the project through the extension
+- Custom Paths: Custom paths for Ninja, Python3, and Git are not stored in `CMakeLists.txt` like SDK and Toolchain paths. You need to build and configure projects through the extension to use these custom paths.
 
 ### GitHub API Rate Limit ("Error while retrieving SDK and toolchain versions")
 
-If the extension fails to get available Pico SDK versions, it might be because of the GitHub API rate limit. You can create a personal access token (classic) with the `public_repo` scope and set it in the global ("User" not "Workspace") extension settings to increase the rate limit.
+If you encounter issues retrieving available Pico SDK versions, it may be due to GitHub API rate limits. To resolve this, create a personal access token (classic PAT) with the `public_repo` scope and set it in the global (User) extension settings to increase your rate limit.
 
 ## Build Instructions
 
-For advanced users who want to build the .vsix file for the extension, these instructions *might* work for you.
+For advanced users who want to build the extension `.vsix` file, follow these steps:
 
-1. Install npm (see [here](https://learn.microsoft.com/en-us/windows/dev-environment/javascript/nodejs-on-windows) for Windows instructions)
-2. Install yarn `npm install --global yarn`
-3. Install vsce `npm install --global @vscode/vsce`
-4. Run `yarn` from the project directory
-5. Run `vsce package` from the project directory
+1. Install nodejs ([Instructions Windows](https://learn.microsoft.com/en-us/windows/dev-environment/javascript/nodejs-on-windows))
+2. Install Yarn globally: `npm install -g yarn`
+3. Install VSCE globally: `npm install -g @vscode/vsce`
+4. Run `yarn` in the project directory to install dependencies.
+5. Build the extension with: `vsce package`.
 
-This will produce a .vsix file which can then be installed in VS Code with `code --install-extension path-to.vsix` or in the GUI `Extensions > three dots > install vsix`.
+This will generate a `.vsix` file, which you can install in VS Code using `code --install-extension path-to.vsix` or via the GUI: `Extensions > three dots > Install from VSIX`.

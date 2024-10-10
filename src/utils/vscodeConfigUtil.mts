@@ -52,11 +52,11 @@ async function updateCppPropertiesFile(
       config.compilerPath =
         "${userHome}/.pico-sdk/toolchain" +
         `/${newToolchainVersion}/bin/${
-          // "arm-none-eabi-gcc" should work on all platforms no need for extension on Windows
-          /*process.platform === "win32"
-          ? "arm-none-eabi-gcc.exe"
-          : "arm-none-eabi-gcc"*/
-          "arm-none-eabi-gcc"
+          newToolchainVersion.includes("RISCV")
+            ? newToolchainVersion.includes("COREV")
+              ? "riscv32-corev-elf-gcc"
+              : "riscv32-unknown-elf-gcc"
+            : "arm-none-eabi-gcc"
         }`;
     });
 
@@ -65,7 +65,7 @@ async function updateCppPropertiesFile(
     await writeFile(file, updatedJsonData, "utf8");
 
     console.log("cpp_properties.json file updated successfully.");
-  } catch (error) {
+  } catch {
     Logger.log("Error updating cpp_properties.json file.");
   }
 }
