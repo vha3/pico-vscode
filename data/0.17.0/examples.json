@@ -59,7 +59,7 @@
           ],
           "supportRiscV": false
     },
-    "Audio_Beep_Synth_(Single_Core)": {
+    "Audio_Beep_Synth_Single_Core": {
         "path": "Audio/c_Audio_Beep_Synthesis_Single_Core",
         "name": "Audio_Beep_Synthesis_Single_Core",
         "libPaths": [],
@@ -71,7 +71,7 @@
           ],
           "supportRiscV": false
     },
-    "Audio_Beep_Synth_(Multicore)": {
+    "Audio_Beep_Synth_Multicore": {
         "path": "Audio/d_Audio_Beep_Synthesis_Multicore",
         "name": "Audio_Beep_Synthesis_Multicore",
         "libPaths": [],
@@ -139,7 +139,7 @@
           ],
           "supportRiscV": false
     },
-    "Serial_Bootloader_(application)": {
+    "Serial_Bootloader_application": {
         "path": "Bootloaders/Serial_bootloader/Application",
         "name": "Serial_Bootloader_Application",
         "libPaths": [],
@@ -163,7 +163,7 @@
           ],
           "supportRiscV": false
     },
-    "Worm_Bootloader_(application)": {
+    "Worm_Bootloader_application": {
         "path": "Bootloaders/Serial_worm/Application",
         "name": "Serial_Worm_Application",
         "libPaths": [],
@@ -211,7 +211,7 @@
           ],
           "supportRiscV": false
     },
-    "UDP_Transmitter_(PIO)": {
+    "UDP_Transmitter_PIO": {
         "path": "Networking/UDP_Transmitter",
         "name": "UDP_TX_PIO",
         "libPaths": [],
@@ -283,7 +283,7 @@
           ],
           "supportRiscV": false
     },
-    "Stepper_Motors_(delta_robot_demo)": {
+    "Stepper_Motors_delta_robot_demo": {
         "path": "Stepper_Motors/Delta_Robot_Demo",
         "name": "Delta_Robot",
         "libPaths": [],
@@ -295,7 +295,7 @@
           ],
           "supportRiscV": false
     },
-    "Stepper_Motors_(position_and_speed)": {
+    "Stepper_Motors_position_and_speed": {
         "path": "Stepper_Motors/Stepper_Position_And_Speed_Control",
         "name": "Position_and_Speed",
         "libPaths": [],
@@ -307,7 +307,7 @@
           ],
           "supportRiscV": false
     },
-    "Stepper_Motors_(position)": {
+    "Stepper_Motors_position": {
         "path": "Stepper_Motors/Stepper_Position_Control",
         "name": "Position",
         "libPaths": [],
@@ -319,7 +319,7 @@
           ],
           "supportRiscV": false
     },
-    "Stepper_Motors_(speed)": {
+    "Stepper_Motors_speed": {
         "path": "Stepper_Motors/Stepper_Speed_Control",
         "name": "Speed",
         "libPaths": [],
