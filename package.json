@@ -2,7 +2,7 @@
   "name": "raspberry-pi-pico",
   "displayName": "ECE 4760 - Raspberry Pi Pico",
   "description": "The official VS Code extension for Raspberry Pi Pico development, modified for ECE 4760 at Cornell. It includes several features to simplify project creation and deployment. (Single folder workspaces only)",
-  "version": "0.16.2",
+  "version": "0.17.1",
   "author": "paulober",
   "publisher": "raspberry-pi",
   "icon": "./images/extension-icon.png",
@@ -116,6 +116,12 @@
       {
         "command": "raspberry-pi-pico.getCompilerPath",
         "title": "Get compiler path",
+        "category": "Raspberry Pi Pico",
+        "enablement": "false"
+      },
+      {
+        "command": "raspberry-pi-pico.getCxxCompilerPath",
+        "title": "Get C++ compiler path",
         "category": "Raspberry Pi Pico",
         "enablement": "false"
       },

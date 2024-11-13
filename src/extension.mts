@@ -16,6 +16,7 @@ import NewProjectCommand from "./commands/newProject.mjs";
 import Logger, { LoggerSource } from "./logger.mjs";
 import {
   CMAKE_DO_NOT_EDIT_HEADER_PREFIX,
+  CMAKE_DO_NOT_EDIT_HEADER_PREFIX_OLD,
   cmakeGetSelectedBoard,
   cmakeGetSelectedToolchainAndSDKVersions,
   configureCmakeNinja,
@@ -37,6 +38,7 @@ import {
   GetEnvPathCommand,
   GetGDBPathCommand,
   GetCompilerPathCommand,
+  GetCxxCompilerPathCommand,
   GetChipCommand,
   GetTargetCommand,
   GetChipUppercaseCommand,
@@ -108,6 +110,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     new GetEnvPathCommand(),
     new GetGDBPathCommand(),
     new GetCompilerPathCommand(),
+    new GetCxxCompilerPathCommand(),
     new GetChipCommand(),
     new GetChipUppercaseCommand(),
     new GetTargetCommand(),
@@ -207,9 +210,14 @@ export async function activate(context: ExtensionContext): Promise<void> {
   // check if it has .vscode folder and cmake donotedit header in CMakelists.txt
   if (
     !existsSync(join(workspaceFolder.uri.fsPath, ".vscode")) ||
-    !readFileSync(cmakeListsFilePath)
-      .toString("utf-8")
-      .includes(CMAKE_DO_NOT_EDIT_HEADER_PREFIX)
+    !(
+      readFileSync(cmakeListsFilePath)
+        .toString("utf-8")
+        .includes(CMAKE_DO_NOT_EDIT_HEADER_PREFIX) ||
+      readFileSync(cmakeListsFilePath)
+        .toString("utf-8")
+        .includes(CMAKE_DO_NOT_EDIT_HEADER_PREFIX_OLD)
+    )
   ) {
     Logger.warn(
       LoggerSource.extension,
