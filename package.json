@@ -1,8 +1,8 @@
 {
   "name": "raspberry-pi-pico",
-  "displayName": "ECE 4760 - Raspberry Pi Pico",
-  "description": "The official VS Code extension for Raspberry Pi Pico development, modified for ECE 4760 at Cornell. It includes several features to simplify project creation and deployment. (Single folder workspaces only)",
-  "version": "0.17.1",
+  "displayName": "Raspberry Pi Pico",
+  "description": "The official VS Code extension for Raspberry Pi Pico development. It includes several features to simplify project creation and deployment. (Single folder workspaces only)",
+  "version": "0.17.2",
   "author": "paulober",
   "publisher": "raspberry-pi",
   "icon": "./images/extension-icon.png",
@@ -186,6 +186,12 @@
       {
         "command": "raspberry-pi-pico.configureCmake",
         "title": "Configure CMake",
+        "category": "Raspberry Pi Pico",
+        "enablement": "raspberry-pi-pico.isPicoProject"
+      },
+      {
+        "command": "raspberry-pi-pico.switchBuildType",
+        "title": "Switch Build Type",
         "category": "Raspberry Pi Pico",
         "enablement": "raspberry-pi-pico.isPicoProject"
       },
